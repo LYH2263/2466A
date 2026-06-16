@@ -45,6 +45,8 @@ model AssetRecord {
   stableBond        Decimal  @map("stable_bond") @db.Decimal(15, 2)
   total             Decimal  @db.Decimal(15, 2)
   note              String?  @db.VarChar(100)
+  editCount         Int      @default(0) @map("edit_count")
+  previousSnapshot  Json?    @map("previous_snapshot")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 

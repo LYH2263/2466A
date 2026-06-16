@@ -113,4 +113,62 @@ router.delete('/:id', authMiddleware, async (req: any, res) => {
   }
 });
 
+// Update asset record
+router.put('/:id', authMiddleware, async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const data = assetSchema.parse(req.body);
+
+    // Check if record exists and belongs to user
+    const existingRecord = await prisma.assetRecord.findFirst({
+      where: {
+        id,
+        userId: req.userId
+      }
+    });
+
+    if (!existingRecord) {
+      return res.status(404).json({ error: '记录不存在或已被删除，无法编辑' });
+    }
+
+    // Build snapshot of current state before edit
+    const snapshot = {
+      date: existingRecord.date.toISOString().split('T')[0],
+      cash: Number(existingRecord.cash),
+      longTermInvest: Number(existingRecord.longTermInvest),
+      stableBond: Number(existingRecord.stableBond),
+      total: Number(existingRecord.total),
+      note: existingRecord.note || null,
+      editedAt: new Date().toISOString()
+    };
+
+    const total = data.cash + data.longTermInvest + data.stableBond;
+
+    const updatedRecord = await prisma.assetRecord.update({
+      where: { id },
+      data: {
+        date: new Date(data.date),
+        cash: data.cash,
+        longTermInvest: data.longTermInvest,
+        stableBond: data.stableBond,
+        total,
+        note: data.note,
+        editCount: { increment: 1 },
+        previousSnapshot: snapshot
+      }
+    });
+
+    res.json({
+      message: '编辑成功',
+      record: updatedRecord
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    console.error('Update asset error:', error);
+    res.status(500).json({ error: '编辑资产记录失败' });
+  }
+});
+
 export default router;

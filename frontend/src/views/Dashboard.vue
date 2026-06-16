@@ -66,10 +66,13 @@
         <!-- Summary Cards -->
         <AssetSummary :latest-record="latestRecord" />
 
-        <!-- Input Form -->
+        <!-- Input / Edit Form -->
         <AssetForm
-          @submit="handleSubmit"
+          :mode="formMode"
+          :editing-record="editingRecord"
+          @submit="handleFormSubmit"
           @fill-demo="handleFillDemo"
+          @cancel="handleCancelEdit"
         />
 
         <!-- Chart -->
@@ -81,6 +84,7 @@
         <!-- List -->
         <AssetList
           :records="records"
+          @edit="handleStartEdit"
           @delete="handleDelete"
           @fill-demo="handleFillDemo"
         />
@@ -92,10 +96,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { WalletFilled, DataLine, DeleteFilled, SwitchButton } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
-import type { AssetFormData } from '../types'
+import type { AssetFormData, AssetRecord } from '../types'
 import axios from 'axios'
 import AssetSummary from '../components/AssetSummary.vue'
 import AssetForm from '../components/AssetForm.vue'
@@ -103,9 +107,23 @@ import AssetChart from '../components/AssetChart.vue'
 import AssetList from '../components/AssetList.vue'
 
 const router = useRouter()
-const { records, latestRecord, chartData, hasRecords, loading, error, fetchRecords, addRecord, deleteRecord, fillDemoData } = useAssets()
+const {
+  records,
+  latestRecord,
+  chartData,
+  hasRecords,
+  loading,
+  error,
+  fetchRecords,
+  addRecord,
+  updateRecord,
+  deleteRecord,
+  fillDemoData
+} = useAssets()
 
 const user = ref<{ id: string; email: string } | null>(null)
+const formMode = ref<'create' | 'edit'>('create')
+const editingRecord = ref<AssetRecord | null>(null)
 
 const fetchUser = async () => {
   try {
@@ -122,13 +140,50 @@ const fetchUser = async () => {
   }
 }
 
-const handleSubmit = async (formData: AssetFormData) => {
-  const result = await addRecord(formData)
-  if (result.success) {
-    ElMessage.success('添加成功')
+const handleFormSubmit = async (formData: AssetFormData) => {
+  if (formMode.value === 'create') {
+    const result = await addRecord(formData)
+    if (result.success) {
+      ElMessage.success('添加成功')
+    } else {
+      ElMessage.error(result.error || '添加失败')
+    }
   } else {
-    ElMessage.error(result.error || '添加失败')
+    if (!editingRecord.value) return
+    const result = await updateRecord(editingRecord.value.id, formData)
+    if (result.success) {
+      ElMessage.success('编辑成功')
+      formMode.value = 'create'
+      editingRecord.value = null
+    } else {
+      if (result.conflict) {
+        ElNotification({
+          title: '编辑冲突',
+          message: result.error || '该记录可能已被删除，请刷新列表后重试。',
+          type: 'error',
+          duration: 5000
+        })
+        // On conflict, refresh the list and exit edit mode
+        await fetchRecords()
+        formMode.value = 'create'
+        editingRecord.value = null
+      } else {
+        ElMessage.error(result.error || '编辑失败')
+      }
+    }
   }
+}
+
+const handleStartEdit = (record: AssetRecord) => {
+  editingRecord.value = record
+  formMode.value = 'edit'
+  // Scroll form into view
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const handleCancelEdit = () => {
+  formMode.value = 'create'
+  editingRecord.value = null
 }
 
 const handleDelete = async (id: string) => {
@@ -143,6 +198,11 @@ const handleDelete = async (id: string) => {
       }
     )
     await deleteRecord(id)
+    // If currently editing the deleted record, exit edit mode
+    if (editingRecord.value?.id === id) {
+      formMode.value = 'create'
+      editingRecord.value = null
+    }
     ElMessage.success('删除成功')
   } catch (err) {
     // Cancelled
@@ -174,6 +234,9 @@ const handleClearAll = async () => {
     for (const record of records.value) {
       await deleteRecord(record.id)
     }
+    // Exit any active edit mode
+    formMode.value = 'create'
+    editingRecord.value = null
     ElMessage.success('数据已清空')
   } catch (err) {
     // Cancelled

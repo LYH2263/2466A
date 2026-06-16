@@ -50,14 +50,31 @@
 
         <el-table-column prop="note" label="备注" min-width="150" show-overflow-tooltip />
 
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="编辑次数" width="100">
           <template #default="{ row }">
-            <el-button
-              type="danger"
-              size="small"
-              :icon="Delete"
-              @click="handleDelete(row)"
-            >删除</el-button>
+            <el-tag v-if="row.editCount > 0" type="warning" size="small">
+              {{ row.editCount }} 次
+            </el-tag>
+            <span v-else class="no-edit">—</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="160" fixed="right">
+          <template #default="{ row }">
+            <div class="action-btns">
+              <el-button
+                type="primary"
+                size="small"
+                :icon="Edit"
+                @click="handleEdit(row)"
+              >编辑</el-button>
+              <el-button
+                type="danger"
+                size="small"
+                :icon="Delete"
+                @click="handleDelete(row)"
+              >删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -66,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AssetRecord } from '../types'
 
@@ -78,6 +95,7 @@ defineProps<Props>()
 
 const emit = defineEmits<{
   delete: [id: string]
+  edit: [record: AssetRecord]
   'fill-demo': []
 }>()
 
@@ -87,6 +105,10 @@ const formatMoney = (value: number): string => {
     currency: 'CNY',
     minimumFractionDigits: 2
   }).format(value)
+}
+
+const handleEdit = (row: AssetRecord) => {
+  emit('edit', row)
 }
 
 const handleDelete = (row: AssetRecord) => {
@@ -146,5 +168,14 @@ const handleDelete = (row: AssetRecord) => {
 .total {
   color: #f56c6c;
   font-weight: 700;
+}
+
+.no-edit {
+  color: #909399;
+}
+
+.action-btns {
+  display: flex;
+  gap: 8px;
 }
 </style>
