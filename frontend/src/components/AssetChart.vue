@@ -4,30 +4,82 @@
       <template #header>
         <div class="card-header">
           <span>资产趋势图</span>
+          <div class="header-controls">
+            <div class="control-group">
+              <span class="control-label">时间粒度</span>
+              <el-radio-group v-model="granularity" size="small">
+                <el-radio-button value="month">月</el-radio-button>
+                <el-radio-button value="quarter">季</el-radio-button>
+                <el-radio-button value="year">年</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div class="control-group">
+              <span class="control-label">聚合方式</span>
+              <el-radio-group v-model="aggregateStrategy" size="small">
+                <el-radio-button value="last">期末值</el-radio-button>
+                <el-radio-button value="average">平均值</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div class="control-group">
+              <span class="control-label">图表类型</span>
+              <el-radio-group v-model="chartType" size="small">
+                <el-radio-button value="line">折线</el-radio-button>
+                <el-radio-button value="stackedArea">堆叠面积</el-radio-button>
+                <el-radio-button value="bar">柱状</el-radio-button>
+              </el-radio-group>
+            </div>
+          </div>
         </div>
       </template>
 
-      <div v-if="chartData.length === 0" class="empty-state">
+      <div v-if="!hasData" class="empty-state">
         <el-empty description="暂无数据，请先添加资产记录或填充示例数据">
           <el-button type="primary" @click="$emit('fill-demo')">填充示例数据</el-button>
         </el-empty>
       </div>
 
-      <v-chart
-        v-else
-        class="chart"
-        :option="chartOption"
-        autoresize
-      />
+      <template v-else>
+        <div class="stats-bar">
+          <div class="stat-item">
+            <span class="stat-label">区间最高</span>
+            <span class="stat-value stat-max">¥{{ formatNumber(stats.maxTotal) }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">区间最低</span>
+            <span class="stat-value stat-min">¥{{ formatNumber(stats.minTotal) }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">区间增长</span>
+            <span :class="['stat-value', stats.growthAmount >= 0 ? 'stat-up' : 'stat-down']">
+              {{ stats.growthAmount >= 0 ? '+' : '' }}¥{{ formatNumber(stats.growthAmount) }}
+            </span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">增长率</span>
+            <span :class="['stat-value', stats.growthRate !== null && stats.growthRate >= 0 ? 'stat-up' : 'stat-down']">
+              {{ stats.growthRate !== null ? (stats.growthRate >= 0 ? '+' : '') + stats.growthRate.toFixed(2) + '%' : '--' }}
+            </span>
+          </div>
+        </div>
+
+        <v-chart
+          ref="chartRef"
+          class="chart"
+          :option="chartOption"
+          autoresize
+          @datazoom="handleDataZoom"
+          @finished="handleChartReady"
+        />
+      </template>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart } from 'echarts/charts'
+import { LineChart, BarChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
@@ -37,10 +89,21 @@ import {
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import type { AssetRecord, Category } from '../types'
+import {
+  aggregateRecords,
+  calculateVisibleStats,
+  buildChartOption,
+  type TimeGranularity,
+  type ChartType,
+  type AggregateStrategy,
+  type AggregatedDataPoint,
+  type VisibleStats
+} from '../utils/chartUtils'
 
 use([
   CanvasRenderer,
   LineChart,
+  BarChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
@@ -59,116 +122,123 @@ defineEmits<{
   'fill-demo': []
 }>()
 
+const chartRef = ref<InstanceType<typeof VChart> | null>(null)
+const granularity = ref<TimeGranularity>('month')
+const aggregateStrategy = ref<AggregateStrategy>('last')
+const chartType = ref<ChartType>('line')
+const visibleStart = ref(0)
+const visibleEnd = ref(0)
+const chartReady = ref(false)
+
 const activeCategories = computed(() =>
-  props.categories.filter(c => c.isActive)
+  props.categories.filter(c => c.isActive).sort((a, b) => a.sortOrder - b.sortOrder)
 )
 
-const categoryMap = computed(() => {
-  const map = new Map<string, Category>()
-  props.categories.forEach(c => map.set(c.id, c))
-  return map
+const activeCategoryIds = computed(() =>
+  activeCategories.value.map(c => c.id)
+)
+
+const hasData = computed(() => props.chartData && props.chartData.length > 0)
+
+const aggregatedData = computed<AggregatedDataPoint[]>(() => {
+  return aggregateRecords(
+    props.chartData,
+    granularity.value,
+    aggregateStrategy.value,
+    activeCategoryIds.value
+  )
 })
 
 const chartOption = computed(() => {
-  const dates = props.chartData.map(r => r.date)
-  const totalData = props.chartData.map(r => r.total)
-
-  const categorySeries = activeCategories.value.map(category => {
-    const data = props.chartData.map(r => {
-      const amount = r.categoryAmounts?.[category.id] ?? 0
-      return amount
-    })
-
-    return {
-      name: category.name,
-      type: 'line',
-      smooth: true,
-      data,
-      itemStyle: { color: category.color },
-      lineStyle: { width: 3 },
-      symbol: 'circle',
-      symbolSize: 6
-    }
-  })
-
-  const legendData = [
-    ...activeCategories.value.map(c => c.name),
-    '总资产'
-  ]
-
-  return {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'cross'
-      },
-      formatter: (params: any[]) => {
-        let html = `<div style="font-weight:600;margin-bottom:5px;">${params[0].axisValue}</div>`
-        params.forEach(p => {
-          html += `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">
-            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span>
-            <span>${p.seriesName}: ¥${p.value.toLocaleString()}</span>
-          </div>`
-        })
-        return html
-      }
-    },
-    legend: {
-      data: legendData,
-      bottom: 0,
-      type: 'scroll',
-      pageTextStyle: {
-        color: '#909399'
-      }
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '18%',
-      top: '10%',
-      containLabel: true
-    },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: dates,
-      axisLabel: {
-        rotate: 45
-      }
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: {
-        formatter: (value: number) => {
-          if (value >= 10000) {
-            return (value / 10000).toFixed(0) + '万'
-          }
-          return value
-        }
-      }
-    },
-    dataZoom: [
-      {
-        type: 'inside',
-        start: 0,
-        end: 100
-      }
-    ],
-    series: [
-      ...categorySeries,
-      {
-        name: '总资产',
-        type: 'line',
-        smooth: true,
-        data: totalData,
-        itemStyle: { color: '#f56c6c' },
-        lineStyle: { width: 4, type: 'dashed' },
-        symbol: 'circle',
-        symbolSize: 8
-      }
-    ]
-  }
+  return buildChartOption(
+    aggregatedData.value,
+    activeCategories.value,
+    chartType.value
+  )
 })
+
+const stats = computed<VisibleStats>(() => {
+  if (aggregatedData.value.length === 0) {
+    return {
+      maxTotal: 0,
+      minTotal: 0,
+      startTotal: 0,
+      endTotal: 0,
+      growthAmount: 0,
+      growthRate: null,
+      hasData: false
+    }
+  }
+
+  const start = chartReady.value ? visibleStart.value : 0
+  const end = chartReady.value ? visibleEnd.value : aggregatedData.value.length - 1
+
+  return calculateVisibleStats(aggregatedData.value, start, end)
+})
+
+const formatNumber = (num: number): string => {
+  if (Math.abs(num) >= 10000) {
+    return (num / 10000).toFixed(2) + '万'
+  }
+  return num.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
+
+const updateVisibleRange = () => {
+  if (!chartRef.value) return
+  const echartsInstance = chartRef.value.getEchartsInstance()
+  if (!echartsInstance) return
+
+  try {
+    const option = echartsInstance.getOption()
+    const dataZoom = option?.dataZoom?.[0]
+    if (!dataZoom) return
+
+    const total = aggregatedData.value.length
+    if (total === 0) return
+
+    let startIdx: number
+    let endIdx: number
+
+    if (typeof dataZoom.startValue === 'number' && typeof dataZoom.endValue === 'number') {
+      startIdx = Math.max(0, Math.floor(dataZoom.startValue))
+      endIdx = Math.min(total - 1, Math.ceil(dataZoom.endValue))
+    } else if (typeof dataZoom.start === 'number' && typeof dataZoom.end === 'number') {
+      startIdx = Math.max(0, Math.floor((dataZoom.start / 100) * (total - 1)))
+      endIdx = Math.min(total - 1, Math.ceil((dataZoom.end / 100) * (total - 1)))
+    } else {
+      startIdx = 0
+      endIdx = total - 1
+    }
+
+    visibleStart.value = startIdx
+    visibleEnd.value = endIdx
+  } catch (e) {
+    visibleStart.value = 0
+    visibleEnd.value = aggregatedData.value.length - 1
+  }
+}
+
+const handleDataZoom = () => {
+  updateVisibleRange()
+}
+
+const handleChartReady = () => {
+  chartReady.value = true
+  updateVisibleRange()
+}
+
+watch(
+  [aggregatedData, granularity, aggregateStrategy],
+  () => {
+    chartReady.value = false
+    visibleStart.value = 0
+    visibleEnd.value = Math.max(0, aggregatedData.value.length - 1)
+    setTimeout(() => {
+      chartReady.value = true
+      updateVisibleRange()
+    }, 50)
+  }
+)
 </script>
 
 <style scoped>
@@ -177,22 +247,110 @@ const chartOption = computed(() => {
 }
 
 .chart-card {
-  min-height: 400px;
+  min-height: 480px;
 }
 
 .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   font-size: 16px;
   font-weight: 600;
 }
 
+.header-controls {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.control-label {
+  font-size: 13px;
+  font-weight: 400;
+  color: #606266;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, #f0f7ff 0%, #f5f0ff 100%);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.stat-max {
+  color: #e6a23c;
+}
+
+.stat-min {
+  color: #909399;
+}
+
+.stat-up {
+  color: #67c23a;
+}
+
+.stat-down {
+  color: #f56c6c;
+}
+
 .chart {
-  height: 400px;
+  height: 420px;
 }
 
 .empty-state {
-  height: 400px;
+  height: 420px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .stats-bar {
+    gap: 12px;
+  }
+
+  .stat-item {
+    min-width: calc(50% - 6px);
+  }
 }
 </style>

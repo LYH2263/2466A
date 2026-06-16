@@ -40,7 +40,7 @@
             <div class="metric-sub" v-if="analysisData.netGrowthPercent !== null" :class="getValueClass(analysisData.netGrowthPercent)">
               {{ formatSignedPercent(analysisData.netGrowthPercent) }}
             </div>
-            <div class="metric-sub" v-else class="na">--%</div>
+            <div v-else class="metric-sub na">--%</div>
             <div class="metric-desc">
               <span>{{ analysisData.startDate }}</span>
               <span class="arrow">→</span>
