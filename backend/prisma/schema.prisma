@@ -24,6 +24,7 @@ model User {
   tags              Tag[]
   goals             Goal[]
   targetAllocation  TargetAllocation?
+  cashFlows         CashFlow[]
 
   @@map("users")
 }
@@ -95,6 +96,7 @@ model AssetRecord {
   user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetItems        AssetItem[]
   tagLinks          AssetRecordTag[]
+  cashFlows         CashFlow[]
 
   @@index([userId])
   @@map("asset_records")
@@ -180,4 +182,24 @@ model TargetAllocation {
 
   @@unique([userId])
   @@map("target_allocations")
+}
+
+model CashFlow {
+  id            String      @id @default(uuid())
+  userId        String      @map("user_id")
+  assetRecordId String?     @map("asset_record_id")
+  date          DateTime    @db.Date
+  amount        Decimal     @db.Decimal(15, 2)
+  type          String      @db.VarChar(10)
+  note          String?     @db.VarChar(200)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assetRecord   AssetRecord? @relation(fields: [assetRecordId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, date])
+  @@index([assetRecordId])
+  @@map("cash_flows")
 }

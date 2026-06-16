@@ -63,6 +63,22 @@
             负债管理
           </el-button>
           <el-button
+            size="small"
+            :icon="Wallet"
+            @click="showCashFlowManager = !showCashFlowManager"
+            :type="showCashFlowManager ? 'primary' : 'default'"
+          >
+            资金流
+          </el-button>
+          <el-button
+            size="small"
+            :icon="TrendCharts"
+            @click="showReturnsAnalysis = !showReturnsAnalysis"
+            :type="showReturnsAnalysis ? 'primary' : 'default'"
+          >
+            收益分析
+          </el-button>
+          <el-button
             v-if="!hasRecords"
             type="primary"
             :icon="DataLine"
@@ -156,6 +172,21 @@
           :fetch-range-analysis="fetchRangeAnalysis"
         />
 
+        <transition name="slide">
+          <ReturnsAnalysis
+            v-if="showReturnsAnalysis"
+            :fetch-returns-analysis="fetchReturnsAnalysis"
+          />
+        </transition>
+
+        <transition name="slide">
+          <CashFlowManager
+            v-if="showCashFlowManager"
+            ref="cashFlowManagerRef"
+            @cashflows-updated="handleCashFlowsUpdated"
+          />
+        </transition>
+
         <AssetForm
           :mode="formMode"
           :editing-record="editingRecord"
@@ -217,10 +248,11 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis, Aim, CreditCard } from '@element-plus/icons-vue'
+import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis, Aim, CreditCard, TrendCharts, Wallet } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
 import { useGoals } from '../composables/useGoals'
 import { useLiabilities } from '../composables/useLiabilities'
+import { useCashFlows } from '../composables/useCashFlows'
 import type { AssetFormData, AssetRecord, AssetTrend, LiabilityFormData, LiabilityRecord, NetWorthTimePoint } from '../types'
 import axios from 'axios'
 import AssetSummary from '../components/AssetSummary.vue'
@@ -236,6 +268,8 @@ import GoalProgress from '../components/GoalProgress.vue'
 import LiabilityForm from '../components/LiabilityForm.vue'
 import LiabilityList from '../components/LiabilityList.vue'
 import AssetAllocation from '../components/AssetAllocation.vue'
+import ReturnsAnalysis from '../components/ReturnsAnalysis.vue'
+import CashFlowManager from '../components/CashFlowManager.vue'
 
 const router = useRouter()
 const {
@@ -283,6 +317,8 @@ const {
   fillDemoData: fillLiabilityDemoData
 } = useLiabilities()
 
+const { fetchReturnsAnalysis } = useCashFlows()
+
 const user = ref<{ id: string; email: string } | null>(null)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRecord = ref<AssetRecord | null>(null)
@@ -293,6 +329,9 @@ const showTagManager = ref(false)
 const showTagStats = ref(false)
 const showGoalManager = ref(false)
 const showLiabilityManager = ref(false)
+const showReturnsAnalysis = ref(false)
+const showCashFlowManager = ref(false)
+const cashFlowManagerRef = ref<InstanceType<typeof CashFlowManager> | null>(null)
 const trendData = ref<AssetTrend | null>(null)
 const netWorthSeries = ref<NetWorthTimePoint[]>([])
 const tagStatsRef = ref<InstanceType<typeof TagStats> | null>(null)
@@ -330,6 +369,10 @@ const handleCategoriesUpdated = async () => {
 const handleAllocationUpdated = async () => {
   trendData.value = await fetchTrendAnalysis()
   await fetchGoals()
+}
+
+const handleCashFlowsUpdated = async () => {
+  trendData.value = await fetchTrendAnalysis()
 }
 
 const handleTagsUpdated = async () => {

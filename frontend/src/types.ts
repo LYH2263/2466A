@@ -275,3 +275,99 @@ export interface AllocationFormData {
   allocations: AllocationItem[]
   warningThreshold: number
 }
+
+export type CashFlowType = 'deposit' | 'withdraw' | 'transfer_in' | 'transfer_out' | 'dividend' | 'interest' | 'other'
+
+export interface CashFlow {
+  id: string
+  date: string
+  amount: number
+  type: CashFlowType
+  note: string | null
+  assetRecordId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CashFlowSummary {
+  totalDeposit: number
+  totalWithdraw: number
+  netCashFlow: number
+  count: number
+}
+
+export interface CashFlowListResponse {
+  cashFlows: CashFlow[]
+  summary: CashFlowSummary
+}
+
+export interface CashFlowFormData {
+  date: string
+  amount: number
+  type: CashFlowType
+  note: string
+  assetRecordId?: string | null
+}
+
+export interface ReturnMetrics {
+  startValue: number
+  endValue: number
+  absoluteReturn: number
+  simpleReturn: number | null
+  timeWeightedReturn: number | null
+  annualizedSimpleReturn: number | null
+  annualizedTimeWeightedReturn: number | null
+}
+
+export interface CategoryReturn {
+  categoryId: string
+  categoryName: string
+  categoryColor: string
+  startValue: number
+  endValue: number
+  absoluteReturn: number
+  simpleReturn: number | null
+  timeWeightedReturn: number | null
+  annualizedSimpleReturn: number | null
+  annualizedTimeWeightedReturn: number | null
+  percentageInTotal: number
+}
+
+export interface CumulativeReturnPoint {
+  date: string
+  total: number
+  cumulativeSimpleReturn: number | null
+  cumulativeTimeWeightedReturn: number | null
+}
+
+export interface ReturnsAnalysis {
+  startDate: string
+  endDate: string
+  actualDays: number
+  hasSufficientData: boolean
+  warnings: string[]
+  total: ReturnMetrics
+  cashFlowSummary: CashFlowSummary
+  categoryReturns: CategoryReturn[]
+  cumulativeCurve: CumulativeReturnPoint[]
+}
+
+export const CASH_FLOW_TYPE_LABELS: Record<CashFlowType, string> = {
+  deposit: '存入',
+  withdraw: '取出',
+  transfer_in: '转入',
+  transfer_out: '转出',
+  dividend: '分红',
+  interest: '利息',
+  other: '其他'
+}
+
+export const CASH_FLOW_TYPE_COLORS: Record<CashFlowType, string> = {
+  deposit: '#67c23a',
+  withdraw: '#f56c6c',
+  transfer_in: '#409eff',
+  transfer_out: '#e6a23c',
+  dividend: '#909399',
+  interest: '#909399',
+  other: '#909399'
+}
