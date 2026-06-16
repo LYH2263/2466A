@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import axios from 'axios'
-import type { AssetRecord, AssetFormData, Category, CategoryAmount } from '../types'
+import type { AssetRecord, AssetFormData, Category, CategoryAmount, AssetTrend, RangeAnalysis } from '../types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -258,6 +258,28 @@ export function useAssets() {
   })
   const hasRecords = computed(() => records.value.length > 0)
 
+  const fetchTrendAnalysis = async (): Promise<AssetTrend | null> => {
+    try {
+      const response = await api.get('/api/assets/trend')
+      return response.data
+    } catch (err: any) {
+      console.error('Fetch trend error:', err)
+      return null
+    }
+  }
+
+  const fetchRangeAnalysis = async (startDate: string, endDate: string): Promise<RangeAnalysis | null> => {
+    try {
+      const response = await api.get('/api/assets/range-analysis', {
+        params: { startDate, endDate }
+      })
+      return response.data
+    } catch (err: any) {
+      console.error('Fetch range analysis error:', err)
+      return null
+    }
+  }
+
   return {
     records: sortedRecords,
     categories,
@@ -274,6 +296,8 @@ export function useAssets() {
     deleteRecord,
     fillDemoData,
     createEmptyFormData,
-    recordToFormData
+    recordToFormData,
+    fetchTrendAnalysis,
+    fetchRangeAnalysis
   }
 }

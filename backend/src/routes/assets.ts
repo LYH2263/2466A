@@ -308,4 +308,294 @@ router.delete('/:id', authMiddleware, async (req: any, res) => {
   }
 });
 
+function calcDiff(current: number, base: number) {
+  const diff = current - base;
+  const percent = base === 0 ? null : (diff / base) * 100;
+  return { diff, percent };
+}
+
+function findClosestYoyRecord(records: any[], targetDate: Date) {
+  if (records.length === 0) return null;
+  const targetTime = targetDate.getTime();
+  let closest: any = null;
+  let minDiff = Infinity;
+  for (const r of records) {
+    const diff = Math.abs(new Date(r.date).getTime() - targetTime);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = r;
+    }
+  }
+  const monthsDiff = Math.abs(
+    (targetDate.getFullYear() - new Date(closest.date).getFullYear()) * 12 +
+    (targetDate.getMonth() - new Date(closest.date).getMonth())
+  );
+  return monthsDiff <= 3 ? closest : null;
+}
+
+router.get('/trend', authMiddleware, async (req: any, res) => {
+  try {
+    const allRecords = await prisma.assetRecord.findMany({
+      where: { userId: req.userId },
+      include: { assetItems: true },
+      orderBy: { date: 'asc' }
+    });
+
+    if (allRecords.length === 0) {
+      return res.json({
+        latestDate: null,
+        categories: [],
+        total: { amount: 0, mom: { diff: 0, percent: null, hasBase: false }, yoy: { diff: 0, percent: null, hasBase: false } },
+        hasSufficientData: { mom: false, yoy: false }
+      });
+    }
+
+    const allCategories = await prisma.category.findMany({
+      where: { userId: req.userId, deletedAt: null, isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+    });
+
+    const latest = allRecords[allRecords.length - 1];
+    const latestDate = new Date(latest.date);
+    const yoyTargetDate = new Date(latestDate.getFullYear() - 1, latestDate.getMonth(), latestDate.getDate());
+
+    const previous = allRecords.length >= 2 ? allRecords[allRecords.length - 2] : null;
+    const yoyRecord = findClosestYoyRecord(allRecords.slice(0, -1), yoyTargetDate);
+
+    const latestCatMap = buildCategoryMap(latest.assetItems, allCategories);
+    const prevCatMap = previous ? buildCategoryMap(previous.assetItems, allCategories) : {};
+    const yoyCatMap = yoyRecord ? buildCategoryMap(yoyRecord.assetItems, allCategories) : {};
+
+    const latestTotal = Number(latest.total);
+    const prevTotal = previous ? Number(previous.total) : 0;
+    const yoyTotal = yoyRecord ? Number(yoyRecord.total) : 0;
+
+    const momCalc = previous ? calcDiff(latestTotal, prevTotal) : { diff: 0, percent: null };
+    const yoyCalc = yoyRecord ? calcDiff(latestTotal, yoyTotal) : { diff: 0, percent: null };
+
+    const categories = allCategories.map(cat => {
+      const amount = latestCatMap[cat.id] ?? 0;
+      const prevAmount = prevCatMap[cat.id] ?? 0;
+      const yoyAmount = yoyCatMap[cat.id] ?? 0;
+
+      const momCat = previous ? calcDiff(amount, prevAmount) : { diff: 0, percent: null };
+      const yoyCat = yoyRecord ? calcDiff(amount, yoyAmount) : { diff: 0, percent: null };
+
+      return {
+        categoryId: cat.id,
+        amount,
+        percentageInTotal: latestTotal === 0 ? 0 : (amount / latestTotal) * 100,
+        mom: {
+          diff: momCat.diff,
+          percent: momCat.percent,
+          hasBase: !!previous,
+          compareDate: previous ? previous.date.toISOString().split('T')[0] : undefined
+        },
+        yoy: {
+          diff: yoyCat.diff,
+          percent: yoyCat.percent,
+          hasBase: !!yoyRecord,
+          compareDate: yoyRecord ? yoyRecord.date.toISOString().split('T')[0] : undefined
+        }
+      };
+    });
+
+    res.json({
+      latestDate: latest.date.toISOString().split('T')[0],
+      categories,
+      total: {
+        amount: latestTotal,
+        mom: {
+          diff: momCalc.diff,
+          percent: momCalc.percent,
+          hasBase: !!previous,
+          compareDate: previous ? previous.date.toISOString().split('T')[0] : undefined
+        },
+        yoy: {
+          diff: yoyCalc.diff,
+          percent: yoyCalc.percent,
+          hasBase: !!yoyRecord,
+          compareDate: yoyRecord ? yoyRecord.date.toISOString().split('T')[0] : undefined
+        }
+      },
+      hasSufficientData: {
+        mom: !!previous,
+        yoy: !!yoyRecord
+      }
+    });
+  } catch (error) {
+    console.error('Trend analysis error:', error);
+    res.status(500).json({ error: '趋势分析计算失败' });
+  }
+});
+
+const rangeSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+}).refine(data => new Date(data.startDate) <= new Date(data.endDate), {
+  message: '开始日期不能晚于结束日期',
+  path: ['startDate']
+});
+
+function calcMaxDrawdown(records: any[]) {
+  if (records.length < 2) {
+    return { value: 0, percent: null, peakDate: '', troughDate: '', hasData: false };
+  }
+  let peak = Number(records[0].total);
+  let peakDate = records[0].date.toISOString().split('T')[0];
+  let maxDD = 0;
+  let maxDDPercent: number | null = null;
+  let troughDate = peakDate;
+  let currentPeak = peak;
+  let currentPeakDate = peakDate;
+
+  for (let i = 1; i < records.length; i++) {
+    const total = Number(records[i].total);
+    const dateStr = records[i].date.toISOString().split('T')[0];
+    if (total > currentPeak) {
+      currentPeak = total;
+      currentPeakDate = dateStr;
+    }
+    const dd = currentPeak - total;
+    const ddPercent = currentPeak === 0 ? null : (dd / currentPeak) * 100;
+    if (dd > maxDD) {
+      maxDD = dd;
+      maxDDPercent = ddPercent;
+      peakDate = currentPeakDate;
+      troughDate = dateStr;
+      peak = currentPeak;
+    }
+  }
+  return { value: maxDD, percent: maxDDPercent, peakDate, troughDate, hasData: true };
+}
+
+function calcAvgMonthlyGrowth(records: any[]) {
+  if (records.length < 2) return { rate: null, monthlyCount: 0 };
+  const sorted = [...records].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const firstDate = new Date(first.date);
+  const lastDate = new Date(last.date);
+  const monthDiff = (lastDate.getFullYear() - firstDate.getFullYear()) * 12 + (lastDate.getMonth() - firstDate.getMonth());
+  if (monthDiff === 0) return { rate: null, monthlyCount: 0 };
+  const firstTotal = Number(first.total);
+  const lastTotal = Number(last.total);
+  if (firstTotal === 0) return { rate: null, monthlyCount: monthDiff };
+  const totalGrowthRate = (lastTotal - firstTotal) / firstTotal;
+  const avgMonthly = totalGrowthRate / monthDiff * 100;
+  return { rate: avgMonthly, monthlyCount: monthDiff };
+}
+
+router.get('/range-analysis', authMiddleware, async (req: any, res) => {
+  try {
+    const { startDate, endDate } = rangeSchema.parse(req.query);
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const allRecords = await prisma.assetRecord.findMany({
+      where: { userId: req.userId },
+      include: { assetItems: true },
+      orderBy: { date: 'asc' }
+    });
+
+    if (allRecords.length === 0) {
+      return res.json({
+        startDate, endDate,
+        startTotal: 0, endTotal: 0, netGrowth: 0, netGrowthPercent: null,
+        categoryContributions: [],
+        maxDrawdown: { value: 0, percent: null, peakDate: '', troughDate: '', hasData: false },
+        avgMonthlyGrowthRate: null, monthlyCount: 0, hasSufficientData: false
+      });
+    }
+
+    const allCategories = await prisma.category.findMany({
+      where: { userId: req.userId, deletedAt: null, isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+    });
+
+    const findBoundaryRecord = (targetDate: Date, direction: 'before' | 'after') => {
+      const targetTime = targetDate.getTime();
+      let best: any = null;
+      let bestDiff = Infinity;
+      for (const r of allRecords) {
+        const rTime = new Date(r.date).getTime();
+        if (direction === 'before' && rTime <= targetTime) {
+          const diff = targetTime - rTime;
+          if (diff < bestDiff) { bestDiff = diff; best = r; }
+        } else if (direction === 'after' && rTime >= targetTime) {
+          const diff = rTime - targetTime;
+          if (diff < bestDiff) { bestDiff = diff; best = r; }
+        }
+      }
+      if (!best) {
+        best = direction === 'before' ? allRecords[allRecords.length - 1] : allRecords[0];
+      }
+      return best;
+    };
+
+    const startRecord = findBoundaryRecord(start, 'before');
+    const endRecord = findBoundaryRecord(end, 'after');
+
+    if (!startRecord || !endRecord) {
+      return res.json({
+        startDate, endDate,
+        startTotal: 0, endTotal: 0, netGrowth: 0, netGrowthPercent: null,
+        categoryContributions: [],
+        maxDrawdown: { value: 0, percent: null, peakDate: '', troughDate: '', hasData: false },
+        avgMonthlyGrowthRate: null, monthlyCount: 0, hasSufficientData: false
+      });
+    }
+
+    const rangeRecords = allRecords.filter(r => {
+      const t = new Date(r.date).getTime();
+      return t >= new Date(startRecord.date).getTime() && t <= new Date(endRecord.date).getTime();
+    });
+
+    const startCatMap = buildCategoryMap(startRecord.assetItems, allCategories);
+    const endCatMap = buildCategoryMap(endRecord.assetItems, allCategories);
+
+    const startTotal = Number(startRecord.total);
+    const endTotal = Number(endRecord.total);
+    const netGrowth = endTotal - startTotal;
+    const netGrowthPercent = startTotal === 0 ? null : (netGrowth / startTotal) * 100;
+
+    const categoryContributions = allCategories.map(cat => {
+      const startAmt = startCatMap[cat.id] ?? 0;
+      const endAmt = endCatMap[cat.id] ?? 0;
+      const diff = endAmt - startAmt;
+      const startPct = startTotal === 0 ? 0 : (startAmt / startTotal) * 100;
+      const endPct = endTotal === 0 ? 0 : (endAmt / endTotal) * 100;
+      const contribPct = Math.abs(netGrowth) < 0.0001 ? null : (diff / Math.abs(netGrowth)) * 100 * Math.sign(netGrowth || 1);
+      return {
+        categoryId: cat.id,
+        startAmount: startAmt,
+        endAmount: endAmt,
+        diff,
+        contributionPercent: contribPct,
+        percentageChange: { start: startPct, end: endPct, diff: endPct - startPct }
+      };
+    });
+
+    const maxDD = calcMaxDrawdown(rangeRecords);
+    const monthlyResult = calcAvgMonthlyGrowth(rangeRecords);
+
+    res.json({
+      startDate: startRecord.date.toISOString().split('T')[0],
+      endDate: endRecord.date.toISOString().split('T')[0],
+      startTotal, endTotal, netGrowth, netGrowthPercent,
+      categoryContributions,
+      maxDrawdown: maxDD,
+      avgMonthlyGrowthRate: monthlyResult.rate,
+      monthlyCount: monthlyResult.monthlyCount,
+      hasSufficientData: rangeRecords.length >= 2
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    console.error('Range analysis error:', error);
+    res.status(500).json({ error: '区间分析计算失败' });
+  }
+});
+
 export default router;

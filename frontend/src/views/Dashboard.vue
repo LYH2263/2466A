@@ -79,6 +79,12 @@
         <AssetSummary
           :latest-record="latestRecord"
           :categories="categories"
+          :trend-data="trendData"
+        />
+
+        <RangeAnalysis
+          :categories="categories"
+          :fetch-range-analysis="fetchRangeAnalysis"
         />
 
         <AssetForm
@@ -116,13 +122,14 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
-import type { AssetFormData, AssetRecord } from '../types'
+import type { AssetFormData, AssetRecord, AssetTrend } from '../types'
 import axios from 'axios'
 import AssetSummary from '../components/AssetSummary.vue'
 import AssetForm from '../components/AssetForm.vue'
 import AssetChart from '../components/AssetChart.vue'
 import AssetList from '../components/AssetList.vue'
 import CategoryManager from '../components/CategoryManager.vue'
+import RangeAnalysis from '../components/RangeAnalysis.vue'
 
 const router = useRouter()
 const {
@@ -140,13 +147,16 @@ const {
   deleteRecord,
   fillDemoData,
   createEmptyFormData,
-  recordToFormData
+  recordToFormData,
+  fetchTrendAnalysis,
+  fetchRangeAnalysis
 } = useAssets()
 
 const user = ref<{ id: string; email: string } | null>(null)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRecord = ref<AssetRecord | null>(null)
 const showCategoryManager = ref(false)
+const trendData = ref<AssetTrend | null>(null)
 
 const fetchUser = async () => {
   try {
@@ -163,8 +173,13 @@ const fetchUser = async () => {
   }
 }
 
-const handleCategoriesUpdated = async () => {
+const loadAllData = async () => {
   await fetchRecords()
+  trendData.value = await fetchTrendAnalysis()
+}
+
+const handleCategoriesUpdated = async () => {
+  await loadAllData()
 }
 
 const handleFormSubmit = async (formData: AssetFormData) => {
@@ -172,6 +187,7 @@ const handleFormSubmit = async (formData: AssetFormData) => {
     const result = await addRecord(formData)
     if (result.success) {
       ElMessage.success('添加成功')
+      trendData.value = await fetchTrendAnalysis()
     } else {
       ElMessage.error(result.error || '添加失败')
     }
@@ -182,6 +198,7 @@ const handleFormSubmit = async (formData: AssetFormData) => {
       ElMessage.success('编辑成功')
       formMode.value = 'create'
       editingRecord.value = null
+      trendData.value = await fetchTrendAnalysis()
     } else {
       if (result.conflict) {
         ElNotification({
@@ -190,7 +207,7 @@ const handleFormSubmit = async (formData: AssetFormData) => {
           type: 'error',
           duration: 5000
         })
-        await fetchRecords()
+        await loadAllData()
         formMode.value = 'create'
         editingRecord.value = null
       } else {
@@ -228,6 +245,7 @@ const handleDelete = async (id: string) => {
       formMode.value = 'create'
       editingRecord.value = null
     }
+    trendData.value = await fetchTrendAnalysis()
     ElMessage.success('删除成功')
   } catch (err) {
     // Cancelled
@@ -237,6 +255,7 @@ const handleDelete = async (id: string) => {
 const handleFillDemo = async () => {
   try {
     await fillDemoData()
+    trendData.value = await fetchTrendAnalysis()
     ElMessage.success('示例数据已填充')
   } catch (err: any) {
     ElMessage.error(err.message || '填充失败')
@@ -260,6 +279,7 @@ const handleClearAll = async () => {
     }
     formMode.value = 'create'
     editingRecord.value = null
+    trendData.value = await fetchTrendAnalysis()
     ElMessage.success('数据已清空')
   } catch (err) {
     // Cancelled
@@ -285,7 +305,7 @@ const handleLogout = async () => {
 
 onMounted(() => {
   fetchUser()
-  fetchRecords()
+  loadAllData()
 })
 </script>
 
