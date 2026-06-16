@@ -99,9 +99,58 @@ export interface AssetTrend {
     mom: TrendCompare
     yoy: TrendCompare
   }
+  totalLiability: {
+    amount: number
+    mom: TrendCompare
+    yoy: TrendCompare
+  }
+  netWorth: {
+    amount: number
+    mom: TrendCompare
+    yoy: TrendCompare
+  }
   hasSufficientData: {
     mom: boolean
     yoy: boolean
+  }
+}
+
+export interface LiabilityRecord {
+  id: string
+  name: string
+  amount: number
+  date: string
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LiabilityFormData {
+  name: string
+  amount: number
+  date: string
+  note: string
+}
+
+export interface NetWorthTimePoint {
+  date: string
+  totalAsset: number
+  totalLiability: number
+  netWorth: number
+  hasAsset: boolean
+  hasLiability: boolean
+}
+
+export interface NetWorthData {
+  series: NetWorthTimePoint[]
+  summary: {
+    latestDate: string | null
+    totalAsset: number
+    totalLiability: number
+    netWorth: number
+    isNegative: boolean
+    hasAssetData: boolean
+    hasLiabilityData: boolean
   }
 }
 

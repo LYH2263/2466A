@@ -6,7 +6,7 @@
         :key="category.id"
         :xs="24"
         :sm="12"
-        :md="Math.max(6, Math.floor(24 / Math.min(displayCategories.length + 1, 5)))"
+        :md="Math.max(6, Math.floor(24 / Math.min(displayCategories.length + 3, 7)))"
       >
         <el-card
           class="summary-card"
@@ -72,7 +72,7 @@
       <el-col
         :xs="24"
         :sm="12"
-        :md="Math.max(6, Math.floor(24 / Math.min(displayCategories.length + 1, 5)))"
+        :md="Math.max(6, Math.floor(24 / Math.min(displayCategories.length + 3, 7)))"
       >
         <el-card class="summary-card total-card" shadow="hover">
           <div class="card-content">
@@ -118,13 +118,143 @@
           </div>
         </el-card>
       </el-col>
+
+      <el-col
+        :xs="24"
+        :sm="12"
+        :md="Math.max(6, Math.floor(24 / Math.min(displayCategories.length + 3, 7)))"
+      >
+        <el-card class="summary-card liability-card" shadow="hover">
+          <div class="card-content">
+            <div class="card-icon"><CreditCard /></div>
+            <div class="card-info">
+              <div class="label">
+                <span class="color-dot" style="background-color: #f56c6c" />
+                总负债
+              </div>
+              <div class="value liability" v-if="trendData">{{ formatMoney(trendData.totalLiability.amount) }}</div>
+              <div class="value empty" v-else>--</div>
+              <div class="date" v-if="trendData?.latestDate">{{ trendData.latestDate }}</div>
+              <div class="trend-row" v-if="trendData">
+                <div class="trend-item" :class="getLiabilityTrendClass(trendData.totalLiability.mom)">
+                  <span class="trend-label">环比</span>
+                  <template v-if="trendData.totalLiability.mom.hasBase">
+                    <el-icon v-if="trendData.totalLiability.mom.diff !== 0" class="trend-arrow">
+                      <Top v-if="trendData.totalLiability.mom.diff > 0" />
+                      <Bottom v-else />
+                    </el-icon>
+                    <span class="trend-amount">{{ formatSignedMoney(trendData.totalLiability.mom.diff) }}</span>
+                    <span class="trend-percent" v-if="trendData.totalLiability.mom.percent !== null">
+                      {{ formatSignedPercent(trendData.totalLiability.mom.percent) }}
+                    </span>
+                    <span class="trend-percent na" v-else>--%</span>
+                  </template>
+                  <span class="trend-na" v-else>暂无对比</span>
+                </div>
+                <div class="trend-item" :class="getLiabilityTrendClass(trendData.totalLiability.yoy)">
+                  <span class="trend-label">同比</span>
+                  <template v-if="trendData.totalLiability.yoy.hasBase">
+                    <el-icon v-if="trendData.totalLiability.yoy.diff !== 0" class="trend-arrow">
+                      <Top v-if="trendData.totalLiability.yoy.diff > 0" />
+                      <Bottom v-else />
+                    </el-icon>
+                    <span class="trend-amount">{{ formatSignedMoney(trendData.totalLiability.yoy.diff) }}</span>
+                    <span class="trend-percent" v-if="trendData.totalLiability.yoy.percent !== null">
+                      {{ formatSignedPercent(trendData.totalLiability.yoy.percent) }}
+                    </span>
+                    <span class="trend-percent na" v-else>--%</span>
+                  </template>
+                  <span class="trend-na" v-else>暂无对比</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col
+        :xs="24"
+        :sm="12"
+        :md="Math.max(6, Math.floor(24 / Math.min(displayCategories.length + 3, 7)))"
+      >
+        <el-card
+          class="summary-card networth-card"
+          shadow="hover"
+          :class="{ 'networth-negative': trendData?.netWorth?.amount < 0 }"
+        >
+          <div class="card-content">
+            <div class="card-icon">
+              <el-icon :class="{ 'icon-negative': trendData?.netWorth?.amount < 0 }">
+                <TrendCharts v-if="!trendData?.netWorth || trendData.netWorth.amount >= 0" />
+                <Warning v-else />
+              </el-icon>
+            </div>
+            <div class="card-info">
+              <div class="label">
+                <span class="color-dot" :style="{ backgroundColor: getNetWorthColor() }" />
+                净资产
+              </div>
+              <div
+                class="value networth"
+                :class="{ 'value-negative': trendData?.netWorth?.amount < 0 }"
+                v-if="trendData"
+              >
+                {{ formatMoney(trendData.netWorth.amount) }}
+                <el-tag
+                  v-if="trendData.netWorth.amount < 0"
+                  type="danger"
+                  size="small"
+                  effect="dark"
+                  class="negative-tag"
+                >
+                  资不抵债
+                </el-tag>
+              </div>
+              <div class="value empty" v-else>--</div>
+              <div class="date" v-if="trendData?.latestDate">{{ trendData.latestDate }}</div>
+              <div class="trend-row" v-if="trendData">
+                <div class="trend-item" :class="getTrendClass(trendData.netWorth.mom)">
+                  <span class="trend-label">环比</span>
+                  <template v-if="trendData.netWorth.mom.hasBase">
+                    <el-icon v-if="trendData.netWorth.mom.diff !== 0" class="trend-arrow">
+                      <Top v-if="trendData.netWorth.mom.diff > 0" />
+                      <Bottom v-else />
+                    </el-icon>
+                    <span class="trend-amount">{{ formatSignedMoney(trendData.netWorth.mom.diff) }}</span>
+                    <span class="trend-percent" v-if="trendData.netWorth.mom.percent !== null">
+                      {{ formatSignedPercent(trendData.netWorth.mom.percent) }}
+                    </span>
+                    <span class="trend-percent na" v-else>--%</span>
+                  </template>
+                  <span class="trend-na" v-else>暂无对比</span>
+                </div>
+                <div class="trend-item" :class="getTrendClass(trendData.netWorth.yoy)">
+                  <span class="trend-label">同比</span>
+                  <template v-if="trendData.netWorth.yoy.hasBase">
+                    <el-icon v-if="trendData.netWorth.yoy.diff !== 0" class="trend-arrow">
+                      <Top v-if="trendData.netWorth.yoy.diff > 0" />
+                      <Bottom v-else />
+                    </el-icon>
+                    <span class="trend-amount">{{ formatSignedMoney(trendData.netWorth.yoy.diff) }}</span>
+                    <span class="trend-percent" v-if="trendData.netWorth.yoy.percent !== null">
+                      {{ formatSignedPercent(trendData.netWorth.yoy.percent) }}
+                    </span>
+                    <span class="trend-percent na" v-else>--%</span>
+                  </template>
+                  <span class="trend-na" v-else>暂无对比</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
     </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Wallet, TrendCharts, Money, Coin, Top, Bottom } from '@element-plus/icons-vue'
+import { Wallet, TrendCharts, Money, Coin, Top, Bottom, CreditCard, Warning } from '@element-plus/icons-vue'
 import type { AssetRecord, Category, AssetTrend, TrendCompare } from '../types'
 
 interface Props {
@@ -184,6 +314,18 @@ const getTrendClass = (compare?: TrendCompare) => {
   if (compare.diff < 0) return 'trend-down'
   return 'trend-flat'
 }
+
+const getLiabilityTrendClass = (compare?: TrendCompare) => {
+  if (!compare || !compare.hasBase) return 'trend-neutral'
+  if (compare.diff < 0) return 'trend-up'
+  if (compare.diff > 0) return 'trend-down'
+  return 'trend-flat'
+}
+
+const getNetWorthColor = (): string => {
+  if (!props.trendData) return '#409eff'
+  return props.trendData.netWorth.amount >= 0 ? '#67c23a' : '#f56c6c'
+}
 </script>
 
 <style scoped>
@@ -211,6 +353,22 @@ const getTrendClass = (compare?: TrendCompare) => {
 }
 
 .total-card .card-icon {
+  color: #f56c6c;
+}
+
+.liability-card .card-icon {
+  color: #f56c6c;
+}
+
+.networth-card .card-icon {
+  color: #67c23a;
+}
+
+.networth-card.networth-negative .card-icon {
+  color: #f56c6c;
+}
+
+.icon-negative {
   color: #f56c6c;
 }
 
@@ -242,6 +400,9 @@ const getTrendClass = (compare?: TrendCompare) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .value.total {
@@ -249,8 +410,32 @@ const getTrendClass = (compare?: TrendCompare) => {
   color: #f56c6c;
 }
 
+.value.liability {
+  font-size: 24px;
+  color: #f56c6c;
+}
+
+.value.networth {
+  font-size: 24px;
+  color: #67c23a;
+}
+
+.value.networth.value-negative {
+  color: #f56c6c;
+}
+
 .value.empty {
   color: #c0c4cc;
+}
+
+.negative-tag {
+  margin-left: 8px;
+  animation: blink 2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .percent {

@@ -1,4 +1,4 @@
-import type { AssetRecord, Category } from '../types'
+import type { AssetRecord, Category, NetWorthTimePoint } from '../types'
 
 export type TimeGranularity = 'month' | 'quarter' | 'year'
 export type ChartType = 'line' | 'stackedArea' | 'bar'
@@ -10,16 +10,24 @@ export interface AggregatedDataPoint {
   startDate: string
   endDate: string
   total: number
+  totalLiability: number
+  netWorth: number
   categoryAmounts: Record<string, number>
 }
 
 export interface VisibleStats {
   maxTotal: number
   minTotal: number
+  maxNetWorth: number
+  minNetWorth: number
   startTotal: number
   endTotal: number
+  startNetWorth: number
+  endNetWorth: number
   growthAmount: number
   growthRate: number | null
+  netWorthGrowthAmount: number
+  netWorthGrowthRate: number | null
   hasData: boolean
 }
 
@@ -131,7 +139,8 @@ export const aggregateRecords = (
   records: AssetRecord[],
   granularity: TimeGranularity,
   strategy: AggregateStrategy = 'last',
-  activeCategoryIds: string[]
+  activeCategoryIds: string[],
+  netWorthSeries: NetWorthTimePoint[] = []
 ): AggregatedDataPoint[] => {
   if (!records || records.length === 0) {
     return []
@@ -154,18 +163,32 @@ export const aggregateRecords = (
     periodMap.get(key)!.push(record)
   }
 
+  const netWorthByPeriod = new Map<string, NetWorthTimePoint[]>()
+  for (const point of netWorthSeries) {
+    const key = getPeriodKey(point.date, granularity)
+    if (!netWorthByPeriod.has(key)) {
+      netWorthByPeriod.set(key, [])
+    }
+    netWorthByPeriod.get(key)!.push(point)
+  }
+
   const allPeriods = generateAllPeriods(minDate, maxDate, granularity)
 
   const result: AggregatedDataPoint[] = []
   let previousTotal = 0
   const previousCategoryAmounts: Record<string, number> = {}
   activeCategoryIds.forEach(id => (previousCategoryAmounts[id] = 0))
+  let previousLiability = 0
+  let previousNetWorth = 0
 
   for (const periodKey of allPeriods) {
     const { startDate, endDate } = getPeriodDateRange(periodKey, granularity)
     const periodRecords = periodMap.get(periodKey) || []
+    const periodNetWorth = netWorthByPeriod.get(periodKey) || []
 
     let total: number
+    let totalLiability: number
+    let netWorth: number
     const categoryAmounts: Record<string, number> = {}
 
     if (periodRecords.length === 0) {
@@ -187,7 +210,23 @@ export const aggregateRecords = (
       }
     }
 
+    if (periodNetWorth.length === 0) {
+      totalLiability = previousLiability
+      netWorth = previousNetWorth
+    } else {
+      const lastPoint = periodNetWorth[periodNetWorth.length - 1]
+      if (strategy === 'last') {
+        totalLiability = lastPoint.totalLiability
+        netWorth = lastPoint.netWorth
+      } else {
+        totalLiability = periodNetWorth.reduce((s, p) => s + p.totalLiability, 0) / periodNetWorth.length
+        netWorth = periodNetWorth.reduce((s, p) => s + p.netWorth, 0) / periodNetWorth.length
+      }
+    }
+
     previousTotal = total
+    previousLiability = totalLiability
+    previousNetWorth = netWorth
     activeCategoryIds.forEach(id => (previousCategoryAmounts[id] = categoryAmounts[id]))
 
     result.push({
@@ -196,6 +235,8 @@ export const aggregateRecords = (
       startDate,
       endDate,
       total,
+      totalLiability,
+      netWorth,
       categoryAmounts
     })
   }
@@ -212,31 +253,50 @@ export const calculateVisibleStats = (
     return {
       maxTotal: 0,
       minTotal: 0,
+      maxNetWorth: 0,
+      minNetWorth: 0,
       startTotal: 0,
       endTotal: 0,
+      startNetWorth: 0,
+      endNetWorth: 0,
       growthAmount: 0,
       growthRate: null,
+      netWorthGrowthAmount: 0,
+      netWorthGrowthRate: null,
       hasData: false
     }
   }
 
   const visible = data.slice(startIndex, endIndex + 1)
   const totals = visible.map(d => d.total)
+  const netWorths = visible.map(d => d.netWorth)
 
   const maxTotal = Math.max(...totals)
   const minTotal = Math.min(...totals)
+  const maxNetWorth = Math.max(...netWorths)
+  const minNetWorth = Math.min(...netWorths)
   const startTotal = visible[0].total
   const endTotal = visible[visible.length - 1].total
+  const startNetWorth = visible[0].netWorth
+  const endNetWorth = visible[visible.length - 1].netWorth
   const growthAmount = endTotal - startTotal
   const growthRate = startTotal !== 0 ? (growthAmount / Math.abs(startTotal)) * 100 : null
+  const netWorthGrowthAmount = endNetWorth - startNetWorth
+  const netWorthGrowthRate = startNetWorth !== 0 ? (netWorthGrowthAmount / Math.abs(startNetWorth)) * 100 : null
 
   return {
     maxTotal,
     minTotal,
+    maxNetWorth,
+    minNetWorth,
     startTotal,
     endTotal,
+    startNetWorth,
+    endNetWorth,
     growthAmount,
     growthRate,
+    netWorthGrowthAmount,
+    netWorthGrowthRate,
     hasData: true
   }
 }
@@ -244,7 +304,8 @@ export const calculateVisibleStats = (
 export const buildChartOption = (
   aggregatedData: AggregatedDataPoint[],
   activeCategories: Category[],
-  chartType: ChartType
+  chartType: ChartType,
+  showLiabilityAndNetWorth: boolean = true
 ): any => {
   if (!aggregatedData || aggregatedData.length === 0) {
     return {}
@@ -252,9 +313,13 @@ export const buildChartOption = (
 
   const xAxisData = aggregatedData.map(d => d.periodLabel)
   const totalData = aggregatedData.map(d => d.total)
+  const totalLiabilityData = aggregatedData.map(d => d.totalLiability)
+  const netWorthData = aggregatedData.map(d => d.netWorth)
+
+  const hasNetWorthData = totalLiabilityData.some(v => v > 0) || netWorthData.some((v, i) => v !== totalData[i])
 
   const formatValue = (value: number): string => {
-    if (value >= 10000) {
+    if (Math.abs(value) >= 10000) {
       return (value / 10000).toFixed(1) + '万'
     }
     return value.toLocaleString()
@@ -262,7 +327,7 @@ export const buildChartOption = (
 
   const buildSeries = () => {
     if (chartType === 'stackedArea') {
-      return activeCategories.map(category => {
+      const categorySeries = activeCategories.map(category => {
         const data = aggregatedData.map(d => d.categoryAmounts[category.id] ?? 0)
         return {
           name: category.name,
@@ -277,6 +342,48 @@ export const buildChartOption = (
           symbolSize: 4
         }
       })
+
+      if (showLiabilityAndNetWorth && hasNetWorthData) {
+        return [
+          ...categorySeries,
+          {
+            name: '总负债',
+            type: 'line',
+            smooth: true,
+            data: totalLiabilityData,
+            itemStyle: { color: '#f56c6c' },
+            lineStyle: { width: 3, type: 'dashed' },
+            symbol: 'circle',
+            symbolSize: 6,
+            z: 90
+          },
+          {
+            name: '净资产',
+            type: 'line',
+            smooth: true,
+            data: netWorthData,
+            itemStyle: { color: '#67c23a' },
+            lineStyle: { width: 4 },
+            symbol: 'circle',
+            symbolSize: 8,
+            z: 100,
+            markLine: {
+              silent: true,
+              symbol: 'none',
+              lineStyle: {
+                color: '#909399',
+                type: 'dashed',
+                width: 1
+              },
+              data: [
+                { yAxis: 0, label: { formatter: '零线', color: '#909399' } }
+              ]
+            }
+          }
+        ]
+      }
+
+      return categorySeries
     }
 
     if (chartType === 'bar') {
@@ -292,8 +399,7 @@ export const buildChartOption = (
         }
       })
 
-      return [
-        ...categorySeries,
+      const extraSeries: any[] = [
         {
           name: '总资产',
           type: 'line',
@@ -305,6 +411,50 @@ export const buildChartOption = (
           symbolSize: 8,
           z: 100
         }
+      ]
+
+      if (showLiabilityAndNetWorth && hasNetWorthData) {
+        extraSeries.push(
+          {
+            name: '总负债',
+            type: 'line',
+            smooth: true,
+            data: totalLiabilityData,
+            itemStyle: { color: '#e6a23c' },
+            lineStyle: { width: 3, type: 'dotted' },
+            symbol: 'circle',
+            symbolSize: 6,
+            z: 95
+          },
+          {
+            name: '净资产',
+            type: 'line',
+            smooth: true,
+            data: netWorthData,
+            itemStyle: { color: '#67c23a' },
+            lineStyle: { width: 4 },
+            symbol: 'circle',
+            symbolSize: 8,
+            z: 110,
+            markLine: {
+              silent: true,
+              symbol: 'none',
+              lineStyle: {
+                color: '#909399',
+                type: 'dashed',
+                width: 1
+              },
+              data: [
+                { yAxis: 0, label: { formatter: '零线', color: '#909399' } }
+              ]
+            }
+          }
+        )
+      }
+
+      return [
+        ...categorySeries,
+        ...extraSeries
       ]
     }
 
@@ -322,8 +472,7 @@ export const buildChartOption = (
       }
     })
 
-    return [
-      ...categorySeries,
+    const extraSeries: any[] = [
       {
         name: '总资产',
         type: 'line',
@@ -335,12 +484,60 @@ export const buildChartOption = (
         symbolSize: 8
       }
     ]
+
+    if (showLiabilityAndNetWorth && hasNetWorthData) {
+      extraSeries.push(
+        {
+          name: '总负债',
+          type: 'line',
+          smooth: true,
+          data: totalLiabilityData,
+          itemStyle: { color: '#e6a23c' },
+          lineStyle: { width: 3, type: 'dotted' },
+          symbol: 'circle',
+          symbolSize: 6
+        },
+        {
+          name: '净资产',
+          type: 'line',
+          smooth: true,
+          data: netWorthData,
+          itemStyle: { color: '#67c23a' },
+          lineStyle: { width: 4 },
+          symbol: 'circle',
+          symbolSize: 8,
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: {
+              color: '#909399',
+              type: 'dashed',
+              width: 1
+            },
+            data: [
+              { yAxis: 0, label: { formatter: '零线', color: '#909399' } }
+            ]
+          }
+        }
+      )
+    }
+
+    return [
+      ...categorySeries,
+      ...extraSeries
+    ]
   }
 
-  const legendData =
-    chartType === 'stackedArea'
+  const getLegendData = () => {
+    const base = chartType === 'stackedArea'
       ? activeCategories.map(c => c.name)
       : [...activeCategories.map(c => c.name), '总资产']
+
+    if (showLiabilityAndNetWorth && hasNetWorthData) {
+      return [...base, '总负债', '净资产']
+    }
+    return base
+  }
 
   return {
     tooltip: {
@@ -355,26 +552,54 @@ export const buildChartOption = (
           let sum = 0
           const sortedParams = [...params].sort((a, b) => (b.value || 0) - (a.value || 0))
           sortedParams.forEach(p => {
-            sum += p.value || 0
+            if (p.seriesName !== '总负债' && p.seriesName !== '净资产') {
+              sum += p.value || 0
+            }
           })
           sortedParams.forEach(p => {
-            const pct = sum > 0 ? ((p.value || 0) / sum * 100).toFixed(1) : '0.0'
+            const isSpecial = p.seriesName === '总负债' || p.seriesName === '净资产'
+            const pct = !isSpecial && sum > 0 ? ((p.value || 0) / sum * 100).toFixed(1) : null
             html += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">
               <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span>
               <span style="flex:1;">${p.seriesName}</span>
               <span style="font-weight:500;">¥${(p.value || 0).toLocaleString()}</span>
-              <span style="color:#909399;font-size:12px;width:50px;text-align:right;">${pct}%</span>
+              ${pct !== null ? `<span style="color:#909399;font-size:12px;width:50px;text-align:right;">${pct}%</span>` : ''}
             </div>`
           })
-          html += `<div style="border-top:1px solid #eee;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;">
-            <span style="font-weight:600;">合计</span>
-            <span style="font-weight:600;">¥${sum.toLocaleString()}</span>
-          </div>`
+          const netWorthParam = params.find(p => p.seriesName === '净资产')
+          const liabilityParam = params.find(p => p.seriesName === '总负债')
+          if (liabilityParam || netWorthParam) {
+            html += `<div style="border-top:1px solid #eee;margin-top:6px;padding-top:6px;">`
+            html += `<div style="display:flex;justify-content:space-between;">
+              <span style="font-weight:600;">合计(资产)</span>
+              <span style="font-weight:600;">¥${sum.toLocaleString()}</span>
+            </div>`
+            if (liabilityParam) {
+              html += `<div style="display:flex;justify-content:space-between;">
+                <span style="color:#e6a23c;">总负债</span>
+                <span style="color:#e6a23c;font-weight:500;">¥${(liabilityParam.value || 0).toLocaleString()}</span>
+              </div>`
+            }
+            if (netWorthParam) {
+              const isNegative = (netWorthParam.value || 0) < 0
+              html += `<div style="display:flex;justify-content:space-between;">
+                <span style="font-weight:600;color:${isNegative ? '#f56c6c' : '#67c23a'};">净资产${isNegative ? ' (资不抵债)' : ''}</span>
+                <span style="font-weight:600;color:${isNegative ? '#f56c6c' : '#67c23a'};">¥${(netWorthParam.value || 0).toLocaleString()}</span>
+              </div>`
+            }
+            html += `</div>`
+          } else {
+            html += `<div style="border-top:1px solid #eee;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;">
+              <span style="font-weight:600;">合计</span>
+              <span style="font-weight:600;">¥${sum.toLocaleString()}</span>
+            </div>`
+          }
         } else {
           params.forEach(p => {
+            const isNegative = p.seriesName === '净资产' && (p.value || 0) < 0
             html += `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">
-              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color}"></span>
-              <span>${p.seriesName}: ¥${(p.value || 0).toLocaleString()}</span>
+              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${isNegative ? '#f56c6c' : p.color}"></span>
+              <span style="${isNegative ? 'color:#f56c6c;font-weight:500;' : ''}">${p.seriesName}${isNegative ? ' (资不抵债)' : ''}: ¥${(p.value || 0).toLocaleString()}</span>
             </div>`
           })
         }
@@ -383,7 +608,7 @@ export const buildChartOption = (
       }
     },
     legend: {
-      data: legendData,
+      data: getLegendData(),
       bottom: 0,
       type: 'scroll',
       pageTextStyle: { color: '#909399' }

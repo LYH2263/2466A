@@ -19,6 +19,7 @@ model User {
 
   categories        Category[]
   assetRecords      AssetRecord[]
+  liabilityRecords  LiabilityRecord[]
   refreshTokens     RefreshToken[]
   tags              Tag[]
   goals             Goal[]
@@ -147,4 +148,21 @@ model Goal {
   @@index([userId])
   @@index([userId, scope])
   @@map("goals")
+}
+
+model LiabilityRecord {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  name        String   @db.VarChar(100)
+  amount      Decimal  @db.Decimal(15, 2)
+  date        DateTime @db.Date
+  note        String?  @db.VarChar(200)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+  @@map("liability_records")
 }

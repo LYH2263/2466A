@@ -55,6 +55,14 @@
             目标管理
           </el-button>
           <el-button
+            size="small"
+            :icon="CreditCard"
+            @click="showLiabilityManager = !showLiabilityManager"
+            :type="showLiabilityManager ? 'primary' : 'default'"
+          >
+            负债管理
+          </el-button>
+          <el-button
             v-if="!hasRecords"
             type="primary"
             :icon="DataLine"
@@ -75,13 +83,13 @@
     </header>
 
     <main class="main-content">
-      <div v-if="loading" class="loading-state">
+      <div v-if="loading || liabilityLoading" class="loading-state">
         <el-skeleton :rows="10" animated />
       </div>
       
-      <div v-else-if="error" class="error-state">
+      <div v-else-if="error || liabilityError" class="error-state">
         <el-alert
-          :title="error"
+          :title="error || liabilityError"
           type="error"
           :closable="false"
           show-icon
@@ -157,6 +165,7 @@
         <AssetChart
           :chart-data="chartData"
           :categories="categories"
+          :net-worth-series="netWorthSeries"
           @fill-demo="handleFillDemo"
         />
 
@@ -170,6 +179,29 @@
           @fill-demo="handleFillDemo"
           @filter-tag="handleTagFilter"
         />
+
+        <transition name="slide">
+          <div v-if="showLiabilityManager">
+            <LiabilityForm
+              :mode="liabilityFormMode"
+              :editing-record="editingLiability"
+              :create-empty-form-data="createEmptyLiabilityFormData"
+              :record-to-form-data="liabilityRecordToFormData"
+              :has-records="hasLiabilityRecords"
+              @submit="handleLiabilityFormSubmit"
+              @cancel="handleCancelLiabilityEdit"
+              @fill-demo="handleFillLiabilityDemo"
+            />
+
+            <LiabilityList
+              :records="liabilityRecords"
+              :loading="liabilityLoading"
+              @edit="handleStartLiabilityEdit"
+              @delete="handleLiabilityDelete"
+              @fill-demo="handleFillLiabilityDemo"
+            />
+          </div>
+        </transition>
       </template>
     </main>
   </div>
@@ -179,10 +211,11 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis, Aim } from '@element-plus/icons-vue'
+import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis, Aim, CreditCard } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
 import { useGoals } from '../composables/useGoals'
-import type { AssetFormData, AssetRecord, AssetTrend } from '../types'
+import { useLiabilities } from '../composables/useLiabilities'
+import type { AssetFormData, AssetRecord, AssetTrend, LiabilityFormData, LiabilityRecord, NetWorthTimePoint } from '../types'
 import axios from 'axios'
 import AssetSummary from '../components/AssetSummary.vue'
 import AssetForm from '../components/AssetForm.vue'
@@ -194,6 +227,8 @@ import TagManager from '../components/TagManager.vue'
 import TagStats from '../components/TagStats.vue'
 import GoalManager from '../components/GoalManager.vue'
 import GoalProgress from '../components/GoalProgress.vue'
+import LiabilityForm from '../components/LiabilityForm.vue'
+import LiabilityList from '../components/LiabilityList.vue'
 
 const router = useRouter()
 const {
@@ -226,14 +261,33 @@ const {
   deleteGoal
 } = useGoals()
 
+const {
+  records: liabilityRecords,
+  hasRecords: hasLiabilityRecords,
+  loading: liabilityLoading,
+  error: liabilityError,
+  fetchRecords: fetchLiabilityRecords,
+  fetchNetWorth,
+  createEmptyFormData: createEmptyLiabilityFormData,
+  recordToFormData: liabilityRecordToFormData,
+  addRecord: addLiabilityRecord,
+  updateRecord: updateLiabilityRecord,
+  deleteRecord: deleteLiabilityRecord,
+  fillDemoData: fillLiabilityDemoData
+} = useLiabilities()
+
 const user = ref<{ id: string; email: string } | null>(null)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRecord = ref<AssetRecord | null>(null)
+const liabilityFormMode = ref<'create' | 'edit'>('create')
+const editingLiability = ref<LiabilityRecord | null>(null)
 const showCategoryManager = ref(false)
 const showTagManager = ref(false)
 const showTagStats = ref(false)
 const showGoalManager = ref(false)
+const showLiabilityManager = ref(false)
 const trendData = ref<AssetTrend | null>(null)
+const netWorthSeries = ref<NetWorthTimePoint[]>([])
 const tagStatsRef = ref<InstanceType<typeof TagStats> | null>(null)
 
 const fetchUser = async () => {
@@ -252,8 +306,13 @@ const fetchUser = async () => {
 }
 
 const loadAllData = async () => {
-  await fetchRecords()
+  await Promise.all([
+    fetchRecords(),
+    fetchLiabilityRecords()
+  ])
   trendData.value = await fetchTrendAnalysis()
+  const netWorthData = await fetchNetWorth('month')
+  netWorthSeries.value = netWorthData?.series || []
   await fetchGoals()
 }
 
@@ -278,6 +337,8 @@ const handleFormSubmit = async (formData: AssetFormData) => {
     if (result.success) {
       ElMessage.success('添加成功')
       trendData.value = await fetchTrendAnalysis()
+      const netWorthData = await fetchNetWorth('month')
+      netWorthSeries.value = netWorthData?.series || []
       await fetchGoals()
     } else {
       ElMessage.error(result.error || '添加失败')
@@ -290,6 +351,8 @@ const handleFormSubmit = async (formData: AssetFormData) => {
       formMode.value = 'create'
       editingRecord.value = null
       trendData.value = await fetchTrendAnalysis()
+      const netWorthData = await fetchNetWorth('month')
+      netWorthSeries.value = netWorthData?.series || []
       await fetchGoals()
     } else {
       if (result.conflict) {
@@ -316,6 +379,7 @@ const handleStartEdit = (record: AssetRecord) => {
   showTagManager.value = false
   showTagStats.value = false
   showGoalManager.value = false
+  showLiabilityManager.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -341,6 +405,8 @@ const handleDelete = async (id: string) => {
       editingRecord.value = null
     }
     trendData.value = await fetchTrendAnalysis()
+    const netWorthData = await fetchNetWorth('month')
+    netWorthSeries.value = netWorthData?.series || []
     await fetchGoals()
     ElMessage.success('删除成功')
   } catch (err) {
@@ -352,12 +418,83 @@ const handleFillDemo = async () => {
   try {
     await fillDemoData()
     trendData.value = await fetchTrendAnalysis()
+    const netWorthData = await fetchNetWorth('month')
+    netWorthSeries.value = netWorthData?.series || []
     if (tagStatsRef.value) {
       await tagStatsRef.value.loadStatistics()
     }
     ElMessage.success('示例数据已填充')
   } catch (err: any) {
     ElMessage.error(err.message || '填充失败')
+  }
+}
+
+const handleFillLiabilityDemo = async () => {
+  try {
+    await fillLiabilityDemoData()
+    trendData.value = await fetchTrendAnalysis()
+    const netWorthData = await fetchNetWorth('month')
+    netWorthSeries.value = netWorthData?.series || []
+    ElMessage.success('负债示例数据已填充')
+  } catch (err: any) {
+    ElMessage.error(err.message || '填充失败')
+  }
+}
+
+const handleLiabilityFormSubmit = async (formData: LiabilityFormData) => {
+  if (liabilityFormMode.value === 'create') {
+    const result = await addLiabilityRecord(formData)
+    if (result.success) {
+      ElMessage.success('添加成功')
+      trendData.value = await fetchTrendAnalysis()
+      const netWorthData = await fetchNetWorth('month')
+      netWorthSeries.value = netWorthData?.series || []
+    } else {
+      ElMessage.error(result.error || '添加失败')
+    }
+  } else {
+    if (!editingLiability.value) return
+    const result = await updateLiabilityRecord(editingLiability.value.id, formData)
+    if (result.success) {
+      ElMessage.success('编辑成功')
+      liabilityFormMode.value = 'create'
+      editingLiability.value = null
+      trendData.value = await fetchTrendAnalysis()
+      const netWorthData = await fetchNetWorth('month')
+      netWorthSeries.value = netWorthData?.series || []
+    } else {
+      ElMessage.error(result.error || '编辑失败')
+    }
+  }
+}
+
+const handleStartLiabilityEdit = (record: LiabilityRecord) => {
+  editingLiability.value = record
+  liabilityFormMode.value = 'edit'
+  const el = document.querySelector('.liability-form-card')
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
+
+const handleCancelLiabilityEdit = () => {
+  liabilityFormMode.value = 'create'
+  editingLiability.value = null
+}
+
+const handleLiabilityDelete = async (id: string) => {
+  try {
+    await deleteLiabilityRecord(id)
+    if (editingLiability.value?.id === id) {
+      liabilityFormMode.value = 'create'
+      editingLiability.value = null
+    }
+    trendData.value = await fetchTrendAnalysis()
+    const netWorthData = await fetchNetWorth('month')
+    netWorthSeries.value = netWorthData?.series || []
+    ElMessage.success('删除成功')
+  } catch (err: any) {
+    ElMessage.error(err.message || '删除失败')
   }
 }
 
@@ -376,9 +513,16 @@ const handleClearAll = async () => {
     for (const record of records.value) {
       await deleteRecord(record.id)
     }
+    for (const record of liabilityRecords.value) {
+      await deleteLiabilityRecord(record.id)
+    }
     formMode.value = 'create'
     editingRecord.value = null
+    liabilityFormMode.value = 'create'
+    editingLiability.value = null
     trendData.value = await fetchTrendAnalysis()
+    const netWorthData = await fetchNetWorth('month')
+    netWorthSeries.value = netWorthData?.series || []
     if (tagStatsRef.value) {
       await tagStatsRef.value.loadStatistics()
     }

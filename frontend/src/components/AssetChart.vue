@@ -41,23 +41,36 @@
       <template v-else>
         <div class="stats-bar">
           <div class="stat-item">
-            <span class="stat-label">区间最高</span>
+            <span class="stat-label">区间最高(资产)</span>
             <span class="stat-value stat-max">¥{{ formatNumber(stats.maxTotal) }}</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">区间最低</span>
+            <span class="stat-label">区间最低(资产)</span>
             <span class="stat-value stat-min">¥{{ formatNumber(stats.minTotal) }}</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">区间增长</span>
+            <span class="stat-label">资产增长</span>
             <span :class="['stat-value', stats.growthAmount >= 0 ? 'stat-up' : 'stat-down']">
               {{ stats.growthAmount >= 0 ? '+' : '' }}¥{{ formatNumber(stats.growthAmount) }}
             </span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">增长率</span>
+            <span class="stat-label">资产增长率</span>
             <span :class="['stat-value', stats.growthRate !== null && stats.growthRate >= 0 ? 'stat-up' : 'stat-down']">
               {{ stats.growthRate !== null ? (stats.growthRate >= 0 ? '+' : '') + stats.growthRate.toFixed(2) + '%' : '--' }}
+            </span>
+          </div>
+          <div class="stat-item" v-if="hasNetWorthData">
+            <span class="stat-label">净资产</span>
+            <span :class="['stat-value', stats.endNetWorth >= 0 ? 'stat-networth' : 'stat-negative']">
+              ¥{{ formatNumber(stats.endNetWorth) }}
+              <el-tag v-if="stats.endNetWorth < 0" type="danger" size="small" effect="dark">资不抵债</el-tag>
+            </span>
+          </div>
+          <div class="stat-item" v-if="hasNetWorthData">
+            <span class="stat-label">净资产增长</span>
+            <span :class="['stat-value', stats.netWorthGrowthAmount >= 0 ? 'stat-up' : 'stat-down']">
+              {{ stats.netWorthGrowthAmount >= 0 ? '+' : '' }}¥{{ formatNumber(stats.netWorthGrowthAmount) }}
             </span>
           </div>
         </div>
@@ -88,7 +101,7 @@ import {
   DataZoomComponent
 } from 'echarts/components'
 import VChart from 'vue-echarts'
-import type { AssetRecord, Category } from '../types'
+import type { AssetRecord, Category, NetWorthTimePoint } from '../types'
 import {
   aggregateRecords,
   calculateVisibleStats,
@@ -114,9 +127,12 @@ use([
 interface Props {
   chartData: AssetRecord[]
   categories: Category[]
+  netWorthSeries?: NetWorthTimePoint[]
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  netWorthSeries: () => []
+})
 
 defineEmits<{
   'fill-demo': []
@@ -140,12 +156,18 @@ const activeCategoryIds = computed(() =>
 
 const hasData = computed(() => props.chartData && props.chartData.length > 0)
 
+const hasNetWorthData = computed(() =>
+  props.netWorthSeries && props.netWorthSeries.length > 0 &&
+  props.netWorthSeries.some(p => p.totalLiability > 0 || p.netWorth !== p.totalAsset)
+)
+
 const aggregatedData = computed<AggregatedDataPoint[]>(() => {
   return aggregateRecords(
     props.chartData,
     granularity.value,
     aggregateStrategy.value,
-    activeCategoryIds.value
+    activeCategoryIds.value,
+    props.netWorthSeries
   )
 })
 
@@ -153,7 +175,8 @@ const chartOption = computed(() => {
   return buildChartOption(
     aggregatedData.value,
     activeCategories.value,
-    chartType.value
+    chartType.value,
+    hasNetWorthData.value
   )
 })
 
@@ -162,10 +185,16 @@ const stats = computed<VisibleStats>(() => {
     return {
       maxTotal: 0,
       minTotal: 0,
+      maxNetWorth: 0,
+      minNetWorth: 0,
       startTotal: 0,
       endTotal: 0,
+      startNetWorth: 0,
+      endNetWorth: 0,
       growthAmount: 0,
       growthRate: null,
+      netWorthGrowthAmount: 0,
+      netWorthGrowthRate: null,
       hasData: false
     }
   }
@@ -304,6 +333,9 @@ watch(
 .stat-value {
   font-size: 18px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .stat-max {
@@ -319,6 +351,14 @@ watch(
 }
 
 .stat-down {
+  color: #f56c6c;
+}
+
+.stat-networth {
+  color: #67c23a;
+}
+
+.stat-negative {
   color: #f56c6c;
 }
 

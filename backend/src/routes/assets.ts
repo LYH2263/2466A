@@ -431,17 +431,25 @@ function findClosestYoyRecord(records: any[], targetDate: Date) {
 
 router.get('/trend', authMiddleware, async (req: any, res) => {
   try {
-    const allRecords = await prisma.assetRecord.findMany({
-      where: { userId: req.userId },
-      include: { assetItems: true },
-      orderBy: { date: 'asc' }
-    });
+    const [allRecords, liabilityRecords] = await Promise.all([
+      prisma.assetRecord.findMany({
+        where: { userId: req.userId },
+        include: { assetItems: true },
+        orderBy: { date: 'asc' }
+      }),
+      prisma.liabilityRecord.findMany({
+        where: { userId: req.userId },
+        orderBy: { date: 'asc' }
+      })
+    ]);
 
     if (allRecords.length === 0) {
       return res.json({
         latestDate: null,
         categories: [],
         total: { amount: 0, mom: { diff: 0, percent: null, hasBase: false }, yoy: { diff: 0, percent: null, hasBase: false } },
+        totalLiability: { amount: 0, mom: { diff: 0, percent: null, hasBase: false }, yoy: { diff: 0, percent: null, hasBase: false } },
+        netWorth: { amount: 0, mom: { diff: 0, percent: null, hasBase: false }, yoy: { diff: 0, percent: null, hasBase: false } },
         hasSufficientData: { mom: false, yoy: false }
       });
     }
@@ -496,6 +504,41 @@ router.get('/trend', authMiddleware, async (req: any, res) => {
       };
     });
 
+    const getLiabilityAtDate = (targetDate: Date): number => {
+      const targetTime = targetDate.getTime();
+      let total = 0;
+      const seenNames = new Map<string, { amount: number; date: Date }>();
+      
+      for (const lr of liabilityRecords) {
+        const lrDate = new Date(lr.date);
+        if (lrDate.getTime() <= targetTime) {
+          const existing = seenNames.get(lr.name);
+          if (!existing || lrDate.getTime() > existing.date.getTime()) {
+            seenNames.set(lr.name, { amount: Number(lr.amount), date: lrDate });
+          }
+        }
+      }
+      
+      for (const { amount } of seenNames.values()) {
+        total += amount;
+      }
+      return total;
+    };
+
+    const latestLiability = getLiabilityAtDate(latestDate);
+    const prevLiability = previous ? getLiabilityAtDate(new Date(previous.date)) : 0;
+    const yoyLiability = yoyRecord ? getLiabilityAtDate(new Date(yoyRecord.date)) : 0;
+
+    const momLiabilityCalc = previous ? calcDiff(latestLiability, prevLiability) : { diff: 0, percent: null };
+    const yoyLiabilityCalc = yoyRecord ? calcDiff(latestLiability, yoyLiability) : { diff: 0, percent: null };
+
+    const latestNetWorth = latestTotal - latestLiability;
+    const prevNetWorth = previous ? prevTotal - prevLiability : 0;
+    const yoyNetWorth = yoyRecord ? yoyTotal - yoyLiability : 0;
+
+    const momNetWorthCalc = previous ? calcDiff(latestNetWorth, prevNetWorth) : { diff: 0, percent: null };
+    const yoyNetWorthCalc = yoyRecord ? calcDiff(latestNetWorth, yoyNetWorth) : { diff: 0, percent: null };
+
     res.json({
       latestDate: latest.date.toISOString().split('T')[0],
       categories,
@@ -510,6 +553,36 @@ router.get('/trend', authMiddleware, async (req: any, res) => {
         yoy: {
           diff: yoyCalc.diff,
           percent: yoyCalc.percent,
+          hasBase: !!yoyRecord,
+          compareDate: yoyRecord ? yoyRecord.date.toISOString().split('T')[0] : undefined
+        }
+      },
+      totalLiability: {
+        amount: latestLiability,
+        mom: {
+          diff: momLiabilityCalc.diff,
+          percent: momLiabilityCalc.percent,
+          hasBase: !!previous,
+          compareDate: previous ? previous.date.toISOString().split('T')[0] : undefined
+        },
+        yoy: {
+          diff: yoyLiabilityCalc.diff,
+          percent: yoyLiabilityCalc.percent,
+          hasBase: !!yoyRecord,
+          compareDate: yoyRecord ? yoyRecord.date.toISOString().split('T')[0] : undefined
+        }
+      },
+      netWorth: {
+        amount: latestNetWorth,
+        mom: {
+          diff: momNetWorthCalc.diff,
+          percent: momNetWorthCalc.percent,
+          hasBase: !!previous,
+          compareDate: previous ? previous.date.toISOString().split('T')[0] : undefined
+        },
+        yoy: {
+          diff: yoyNetWorthCalc.diff,
+          percent: yoyNetWorthCalc.percent,
           hasBase: !!yoyRecord,
           compareDate: yoyRecord ? yoyRecord.date.toISOString().split('T')[0] : undefined
         }
