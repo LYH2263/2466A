@@ -23,6 +23,7 @@ model User {
   refreshTokens     RefreshToken[]
   tags              Tag[]
   goals             Goal[]
+  targetAllocation  TargetAllocation?
 
   @@map("users")
 }
@@ -165,4 +166,18 @@ model LiabilityRecord {
   @@index([userId])
   @@index([userId, date])
   @@map("liability_records")
+}
+
+model TargetAllocation {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  allocations      Json     @map("allocations")
+  warningThreshold Decimal  @default(10) @map("warning_threshold") @db.Decimal(5, 2)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("target_allocations")
 }

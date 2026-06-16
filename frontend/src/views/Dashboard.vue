@@ -145,6 +145,12 @@
           :trend-data="trendData"
         />
 
+        <AssetAllocation
+          :latest-record="latestRecord"
+          :categories="categories"
+          @allocation-updated="handleAllocationUpdated"
+        />
+
         <RangeAnalysis
           :categories="categories"
           :fetch-range-analysis="fetchRangeAnalysis"
@@ -229,6 +235,7 @@ import GoalManager from '../components/GoalManager.vue'
 import GoalProgress from '../components/GoalProgress.vue'
 import LiabilityForm from '../components/LiabilityForm.vue'
 import LiabilityList from '../components/LiabilityList.vue'
+import AssetAllocation from '../components/AssetAllocation.vue'
 
 const router = useRouter()
 const {
@@ -318,6 +325,11 @@ const loadAllData = async () => {
 
 const handleCategoriesUpdated = async () => {
   await loadAllData()
+}
+
+const handleAllocationUpdated = async () => {
+  trendData.value = await fetchTrendAnalysis()
+  await fetchGoals()
 }
 
 const handleTagsUpdated = async () => {

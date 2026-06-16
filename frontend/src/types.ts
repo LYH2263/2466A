@@ -228,3 +228,50 @@ export interface GoalFormData {
   scope: 'total' | 'category'
   categoryId?: string | null
 }
+
+export interface AllocationItem {
+  categoryId: string
+  percentage: number
+}
+
+export interface TargetAllocation {
+  id: string
+  allocations: AllocationItem[]
+  warningThreshold: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RebalanceItem {
+  categoryId: string
+  categoryName: string
+  categoryColor: string
+  actualAmount: number
+  actualPercent: number
+  targetPercent: number
+  targetAmount: number
+  diffAmount: number
+  diffPercent: number
+  isWarning: boolean
+  rebalanceAmount: number
+}
+
+export interface RebalanceResult {
+  totalAsset: number
+  warningThreshold: number
+  items: RebalanceItem[]
+  roundingCorrection: number
+  rebalanceSum: number
+}
+
+export interface RebalanceResponse {
+  hasTarget: boolean
+  hasLatest: boolean
+  latestDate: string | null
+  rebalance: RebalanceResult | null
+}
+
+export interface AllocationFormData {
+  allocations: AllocationItem[]
+  warningThreshold: number
+}

@@ -11,6 +11,7 @@ import categoryRoutes from './routes/categories.js';
 import { tagRoutes } from './routes/tags.js';
 import goalRoutes from './routes/goals.js';
 import liabilityRoutes from './routes/liabilities.js';
+import allocationRoutes from './routes/allocations.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -62,6 +63,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/tags', tagRoutes);
 app.use('/api/goals', goalRoutes);
 app.use('/api/liabilities', liabilityRoutes);
+app.use('/api/allocations', allocationRoutes);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
