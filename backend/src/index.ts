@@ -7,6 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import authRoutes from './routes/auth.js';
 import assetRoutes from './routes/assets.js';
+import categoryRoutes from './routes/categories.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -54,6 +55,7 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/assets', assetRoutes);
+app.use('/api/categories', categoryRoutes);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -66,7 +68,27 @@ app.use((req, res) => {
   res.status(404).json({ error: '接口不存在' });
 });
 
-// Auto-seed: create default admin user if not exists
+const DEFAULT_CATEGORIES = [
+  { name: '活钱', color: '#67c23a', sortOrder: 0 },
+  { name: '长期投资', color: '#e6a23c', sortOrder: 1 },
+  { name: '稳定债券', color: '#409eff', sortOrder: 2 }
+];
+
+async function createDefaultCategoriesForUser(userId: string) {
+  for (const cat of DEFAULT_CATEGORIES) {
+    await prisma.category.create({
+      data: {
+        userId,
+        name: cat.name,
+        color: cat.color,
+        sortOrder: cat.sortOrder,
+        isDefault: true,
+        isActive: true
+      }
+    });
+  }
+}
+
 async function autoSeed() {
   try {
     const existingAdmin = await prisma.user.findUnique({
@@ -75,14 +97,23 @@ async function autoSeed() {
 
     if (!existingAdmin) {
       const passwordHash = await bcrypt.hash('admin123', 12);
-      await prisma.user.create({
+      const user = await prisma.user.create({
         data: {
           email: 'admin@example.com',
           passwordHash,
           role: 'admin'
         }
       });
-      console.log('Default admin user created');
+      await createDefaultCategoriesForUser(user.id);
+      console.log('Default admin user created with categories');
+    } else {
+      const existingCategories = await prisma.category.findMany({
+        where: { userId: existingAdmin.id, deletedAt: null }
+      });
+      if (existingCategories.length === 0) {
+        await createDefaultCategoriesForUser(existingAdmin.id);
+        console.log('Default categories created for existing admin');
+      }
     }
   } catch (error) {
     console.error('Auto-seed error:', error);

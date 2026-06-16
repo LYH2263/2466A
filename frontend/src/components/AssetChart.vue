@@ -36,7 +36,7 @@ import {
   DataZoomComponent
 } from 'echarts/components'
 import VChart from 'vue-echarts'
-import type { AssetRecord } from '../types'
+import type { AssetRecord, Category } from '../types'
 
 use([
   CanvasRenderer,
@@ -50,6 +50,7 @@ use([
 
 interface Props {
   chartData: AssetRecord[]
+  categories: Category[]
 }
 
 const props = defineProps<Props>()
@@ -58,12 +59,42 @@ defineEmits<{
   'fill-demo': []
 }>()
 
+const activeCategories = computed(() =>
+  props.categories.filter(c => c.isActive)
+)
+
+const categoryMap = computed(() => {
+  const map = new Map<string, Category>()
+  props.categories.forEach(c => map.set(c.id, c))
+  return map
+})
+
 const chartOption = computed(() => {
   const dates = props.chartData.map(r => r.date)
-  const cashData = props.chartData.map(r => r.cash)
-  const investData = props.chartData.map(r => r.longTermInvest)
-  const bondData = props.chartData.map(r => r.stableBond)
   const totalData = props.chartData.map(r => r.total)
+
+  const categorySeries = activeCategories.value.map(category => {
+    const data = props.chartData.map(r => {
+      const amount = r.categoryAmounts?.[category.id] ?? 0
+      return amount
+    })
+
+    return {
+      name: category.name,
+      type: 'line',
+      smooth: true,
+      data,
+      itemStyle: { color: category.color },
+      lineStyle: { width: 3 },
+      symbol: 'circle',
+      symbolSize: 6
+    }
+  })
+
+  const legendData = [
+    ...activeCategories.value.map(c => c.name),
+    '总资产'
+  ]
 
   return {
     tooltip: {
@@ -83,13 +114,17 @@ const chartOption = computed(() => {
       }
     },
     legend: {
-      data: ['活钱', '长期投资', '稳定债券', '总资产'],
-      bottom: 0
+      data: legendData,
+      bottom: 0,
+      type: 'scroll',
+      pageTextStyle: {
+        color: '#909399'
+      }
     },
     grid: {
       left: '3%',
       right: '4%',
-      bottom: '15%',
+      bottom: '18%',
       top: '10%',
       containLabel: true
     },
@@ -120,36 +155,7 @@ const chartOption = computed(() => {
       }
     ],
     series: [
-      {
-        name: '活钱',
-        type: 'line',
-        smooth: true,
-        data: cashData,
-        itemStyle: { color: '#67c23a' },
-        lineStyle: { width: 3 },
-        symbol: 'circle',
-        symbolSize: 6
-      },
-      {
-        name: '长期投资',
-        type: 'line',
-        smooth: true,
-        data: investData,
-        itemStyle: { color: '#e6a23c' },
-        lineStyle: { width: 3 },
-        symbol: 'circle',
-        symbolSize: 6
-      },
-      {
-        name: '稳定债券',
-        type: 'line',
-        smooth: true,
-        data: bondData,
-        itemStyle: { color: '#409eff' },
-        lineStyle: { width: 3 },
-        symbol: 'circle',
-        symbolSize: 6
-      },
+      ...categorySeries,
       {
         name: '总资产',
         type: 'line',

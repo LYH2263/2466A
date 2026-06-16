@@ -30,45 +30,26 @@
         </el-row>
 
         <el-row :gutter="20">
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="活钱（元）">
-              <el-input-number
-                v-model="formData.cash"
-                :precision="2"
-                :min="0"
-                :step="1000"
-                placeholder="0.00"
-                style="width: 100%"
-                controls-position="right"
-              />
-            </el-form-item>
-          </el-col>
-          
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="长期投资（元）">
-              <el-input-number
-                v-model="formData.longTermInvest"
-                :precision="2"
-                :min="0"
-                :step="1000"
-                placeholder="0.00"
-                style="width: 100%"
-                controls-position="right"
-              />
-            </el-form-item>
-          </el-col>
-          
-          <el-col :xs="24" :sm="8">
-            <el-form-item label="稳定债券（元）">
-              <el-input-number
-                v-model="formData.stableBond"
-                :precision="2"
-                :min="0"
-                :step="1000"
-                placeholder="0.00"
-                style="width: 100%"
-                controls-position="right"
-              />
+          <el-col
+            v-for="(category, index) in activeCategories"
+            :key="category.id"
+            :xs="24"
+            :sm="8"
+            :md="Math.max(6, Math.floor(24 / Math.min(activeCategories.length, 4)))"
+          >
+            <el-form-item :label="`${category.name}（元）`" required>
+              <div class="category-input-wrapper">
+                <div class="color-dot" :style="{ backgroundColor: category.color }" />
+                <el-input-number
+                  v-model="formData.categoryAmounts[index].amount"
+                  :precision="2"
+                  :min="0"
+                  :step="1000"
+                  :placeholder="`${category.name}金额`"
+                  style="width: 100%"
+                  controls-position="right"
+                />
+              </div>
             </el-form-item>
           </el-col>
         </el-row>
@@ -101,13 +82,16 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, watch, computed } from 'vue'
 import { Plus, DataLine, Edit, Close } from '@element-plus/icons-vue'
-import type { AssetFormData, AssetRecord } from '../types'
+import type { AssetFormData, AssetRecord, Category } from '../types'
 
 interface Props {
   mode?: 'create' | 'edit'
   editingRecord?: AssetRecord | null
+  activeCategories: Category[]
+  createEmptyFormData: () => AssetFormData
+  recordToFormData: (record: AssetRecord) => AssetFormData
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -123,47 +107,64 @@ const emit = defineEmits<{
 
 const formRef = ref()
 
-const formData = reactive<AssetFormData>({
-  date: new Date().toISOString().split('T')[0],
-  cash: null,
-  longTermInvest: null,
-  stableBond: null,
-  note: ''
-})
+const formData = reactive<AssetFormData>(props.createEmptyFormData())
 
 const editCount = ref(0)
 
-// Prefill form when editingRecord changes
+const activeCategories = computed(() => props.activeCategories)
+
 watch(
   () => props.editingRecord,
   (record) => {
     if (record && props.mode === 'edit') {
-      formData.date = record.date
-      formData.cash = record.cash
-      formData.longTermInvest = record.longTermInvest
-      formData.stableBond = record.stableBond
-      formData.note = record.note || ''
+      const data = props.recordToFormData(record)
+      formData.date = data.date
+      formData.categoryAmounts = data.categoryAmounts
+      formData.note = data.note
       editCount.value = record.editCount || 0
     }
   },
   { immediate: true }
 )
 
+watch(
+  () => props.activeCategories,
+  () => {
+    if (props.mode === 'create') {
+      const data = props.createEmptyFormData()
+      formData.date = data.date
+      formData.categoryAmounts = data.categoryAmounts
+      formData.note = data.note
+    }
+  },
+  { deep: true }
+)
+
 const resetForm = () => {
-  formData.date = new Date().toISOString().split('T')[0]
-  formData.cash = null
-  formData.longTermInvest = null
-  formData.stableBond = null
-  formData.note = ''
+  const data = props.createEmptyFormData()
+  formData.date = data.date
+  formData.categoryAmounts = data.categoryAmounts
+  formData.note = data.note
   editCount.value = 0
 }
 
 const handleSubmit = () => {
-  emit('submit', { ...formData })
+  const hasPositive = formData.categoryAmounts.some(ca => (ca.amount || 0) > 0)
+  if (!hasPositive) {
+    return
+  }
+  
+  emit('submit', {
+    ...formData,
+    categoryAmounts: formData.categoryAmounts.map(ca => ({
+      categoryId: ca.categoryId,
+      amount: ca.amount || 0
+    }))
+  })
+  
   if (props.mode === 'create') {
-    formData.cash = null
-    formData.longTermInvest = null
-    formData.stableBond = null
+    const data = props.createEmptyFormData()
+    formData.categoryAmounts = data.categoryAmounts
     formData.note = ''
   }
 }
@@ -191,5 +192,20 @@ const handleCancel = () => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.category-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid white;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 </style>

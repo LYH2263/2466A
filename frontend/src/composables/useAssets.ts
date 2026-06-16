@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import axios from 'axios'
-import type { AssetRecord, AssetFormData } from '../types'
+import type { AssetRecord, AssetFormData, Category, CategoryAmount } from '../types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -11,7 +11,6 @@ const api = axios.create({
   }
 })
 
-// Add auth token to requests
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('accessToken')
   if (token) {
@@ -20,7 +19,6 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Handle token expiration
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -30,7 +28,6 @@ api.interceptors.response.use(
       originalRequest._retry = true
       
       try {
-        // Try to refresh token
         const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {}, {
           withCredentials: true
         })
@@ -38,11 +35,9 @@ api.interceptors.response.use(
         const { accessToken } = response.data
         localStorage.setItem('accessToken', accessToken)
         
-        // Retry original request
         originalRequest.headers.Authorization = `Bearer ${accessToken}`
         return api(originalRequest)
       } catch (refreshError) {
-        // Refresh failed, logout
         localStorage.removeItem('accessToken')
         window.location.href = '/login'
         return Promise.reject(refreshError)
@@ -53,29 +48,58 @@ api.interceptors.response.use(
   }
 )
 
-const mapRecord = (r: any): AssetRecord => ({
-  ...r,
-  date: r.date.split('T')[0],
-  cash: Number(r.cash),
-  longTermInvest: Number(r.longTermInvest),
-  stableBond: Number(r.stableBond),
-  total: Number(r.total),
-  editCount: r.editCount ?? 0,
-  previousSnapshot: r.previousSnapshot ?? null,
-  updatedAt: r.updatedAt ?? r.createdAt
-})
+const mapRecord = (r: any, categories: Category[]): AssetRecord => {
+  const categoryMap = new Map(categories.map(c => [c.id, c.name]))
+  let cash = 0, longTermInvest = 0, stableBond = 0
+
+  if (r.categoryAmounts) {
+    for (const [categoryId, amount] of Object.entries(r.categoryAmounts)) {
+      const name = categoryMap.get(categoryId)
+      if (name === '活钱') cash = Number(amount)
+      else if (name === '长期投资') longTermInvest = Number(amount)
+      else if (name === '稳定债券') stableBond = Number(amount)
+    }
+  }
+
+  return {
+    ...r,
+    date: r.date.split('T')[0],
+    cash: cash,
+    longTermInvest: longTermInvest,
+    stableBond: stableBond,
+    total: Number(r.total),
+    categoryAmounts: r.categoryAmounts || {},
+    editCount: r.editCount ?? 0,
+    previousSnapshot: r.previousSnapshot ?? null,
+    updatedAt: r.updatedAt ?? r.createdAt
+  }
+}
 
 export function useAssets() {
   const records = ref<AssetRecord[]>([])
+  const categories = ref<Category[]>([])
   const loading = ref(false)
   const error = ref('')
+
+  const activeCategories = computed(() =>
+    categories.value.filter(c => c.isActive)
+  )
+
+  const categoryMap = computed(() => {
+    const map = new Map<string, Category>()
+    categories.value.forEach(c => map.set(c.id, c))
+    return map
+  })
 
   const fetchRecords = async () => {
     loading.value = true
     error.value = ''
     try {
-      const response = await api.get('/api/assets')
-      records.value = response.data.records.map(mapRecord)
+      const response = await api.get('/api/assets', {
+        params: { includeInactive: true }
+      })
+      categories.value = response.data.categories || []
+      records.value = response.data.records.map((r: any) => mapRecord(r, categories.value))
     } catch (err: any) {
       error.value = err.response?.data?.error || '获取数据失败'
       throw err
@@ -84,9 +108,28 @@ export function useAssets() {
     }
   }
 
+  const createEmptyFormData = (): AssetFormData => {
+    return {
+      date: new Date().toISOString().split('T')[0],
+      categoryAmounts: activeCategories.value.map(c => ({
+        categoryId: c.id,
+        amount: 0
+      })),
+      note: ''
+    }
+  }
+
   const addRecord = async (formData: AssetFormData): Promise<{ success: boolean; error?: string }> => {
     try {
-      await api.post('/api/assets', formData)
+      const payload = {
+        date: formData.date,
+        categoryAmounts: formData.categoryAmounts.map(ca => ({
+          categoryId: ca.categoryId,
+          amount: ca.amount || 0
+        })),
+        note: formData.note || undefined
+      }
+      await api.post('/api/assets', payload)
       await fetchRecords()
       return { success: true }
     } catch (err: any) {
@@ -95,43 +138,64 @@ export function useAssets() {
     }
   }
 
+  const recordToFormData = (record: AssetRecord): AssetFormData => {
+    const categoryAmounts: CategoryAmount[] = activeCategories.value.map(c => ({
+      categoryId: c.id,
+      amount: record.categoryAmounts?.[c.id] ?? 0
+    }))
+
+    return {
+      date: record.date,
+      categoryAmounts,
+      note: record.note || ''
+    }
+  }
+
   const updateRecord = async (
     id: string,
     formData: AssetFormData
   ): Promise<{ success: boolean; error?: string; conflict?: boolean }> => {
-    // Save original records for rollback
     const originalRecords = [...records.value]
     const originalIndex = originalRecords.findIndex((r) => r.id === id)
     if (originalIndex === -1) {
       return { success: false, error: '本地未找到该记录', conflict: true }
     }
 
-    // Build optimistic updated record
+    const total = formData.categoryAmounts.reduce((sum, ca) => sum + (ca.amount || 0), 0)
+    const newCategoryAmounts: Record<string, number> = {}
+    for (const ca of formData.categoryAmounts) {
+      newCategoryAmounts[ca.categoryId] = ca.amount || 0
+    }
+
     const updatedOptimistic: AssetRecord = {
       ...originalRecords[originalIndex],
       date: formData.date,
-      cash: formData.cash ?? 0,
-      longTermInvest: formData.longTermInvest ?? 0,
-      stableBond: formData.stableBond ?? 0,
-      total: (formData.cash ?? 0) + (formData.longTermInvest ?? 0) + (formData.stableBond ?? 0),
+      categoryAmounts: newCategoryAmounts,
+      total,
       note: formData.note,
       editCount: originalRecords[originalIndex].editCount + 1,
       updatedAt: new Date().toISOString()
     }
 
-    // Apply optimistic update
     records.value = originalRecords.map((r, idx) =>
       idx === originalIndex ? updatedOptimistic : r
     )
 
     try {
-      const response = await api.put(`/api/assets/${id}`, formData)
-      // Replace optimistic record with server record for accuracy
-      const serverRecord = mapRecord(response.data.record)
+      const payload = {
+        date: formData.date,
+        categoryAmounts: formData.categoryAmounts.map(ca => ({
+          categoryId: ca.categoryId,
+          amount: ca.amount || 0
+        })),
+        note: formData.note || undefined
+      }
+
+      const response = await api.put(`/api/assets/${id}`, payload)
+      const serverRecord = mapRecord(response.data.record, categories.value)
       records.value = records.value.map((r) => (r.id === id ? serverRecord : r))
       return { success: true }
     } catch (err: any) {
-      // Rollback
       records.value = originalRecords
 
       const status = err.response?.status
@@ -154,22 +218,35 @@ export function useAssets() {
   }
 
   const fillDemoData = async () => {
+    const activeCats = activeCategories.value
+    if (activeCats.length < 3) {
+      throw new Error('需要至少3个活动类别才能填充示例数据')
+    }
+
+    const [cashCat, investCat, bondCat] = activeCats
     const demoData = [
-      { date: '2024-01-01', cash: 50000, longTermInvest: 100000, stableBond: 30000, note: '年初盘点' },
-      { date: '2024-02-01', cash: 55000, longTermInvest: 105000, stableBond: 30000, note: '月度盘点' },
-      { date: '2024-03-01', cash: 60000, longTermInvest: 110000, stableBond: 35000, note: '季度盘点' },
-      { date: '2024-04-01', cash: 58000, longTermInvest: 115000, stableBond: 35000, note: '月度盘点' },
-      { date: '2024-05-01', cash: 62000, longTermInvest: 120000, stableBond: 40000, note: '月度盘点' },
-      { date: '2024-06-01', cash: 65000, longTermInvest: 125000, stableBond: 40000, note: '半年盘点' }
+      { date: '2024-01-01', amounts: { [cashCat.id]: 50000, [investCat.id]: 100000, [bondCat.id]: 30000 }, note: '年初盘点' },
+      { date: '2024-02-01', amounts: { [cashCat.id]: 55000, [investCat.id]: 105000, [bondCat.id]: 30000 }, note: '月度盘点' },
+      { date: '2024-03-01', amounts: { [cashCat.id]: 60000, [investCat.id]: 110000, [bondCat.id]: 35000 }, note: '季度盘点' },
+      { date: '2024-04-01', amounts: { [cashCat.id]: 58000, [investCat.id]: 115000, [bondCat.id]: 35000 }, note: '月度盘点' },
+      { date: '2024-05-01', amounts: { [cashCat.id]: 62000, [investCat.id]: 120000, [bondCat.id]: 40000 }, note: '月度盘点' },
+      { date: '2024-06-01', amounts: { [cashCat.id]: 65000, [investCat.id]: 125000, [bondCat.id]: 40000 }, note: '半年盘点' }
     ]
     
     for (const data of demoData) {
-      await api.post('/api/assets', data)
+      const categoryAmounts = Object.entries(data.amounts).map(([categoryId, amount]) => ({
+        categoryId,
+        amount
+      }))
+      await api.post('/api/assets', {
+        date: data.date,
+        categoryAmounts,
+        note: data.note
+      })
     }
     await fetchRecords()
   }
 
-  // Computed
   const latestRecord = computed(() => records.value[0] || null)
   const sortedRecords = computed(() => [...records.value].sort((a, b) => 
     new Date(b.date).getTime() - new Date(a.date).getTime()
@@ -183,6 +260,9 @@ export function useAssets() {
 
   return {
     records: sortedRecords,
+    categories,
+    activeCategories,
+    categoryMap,
     latestRecord,
     chartData,
     hasRecords,
@@ -192,6 +272,8 @@ export function useAssets() {
     addRecord,
     updateRecord,
     deleteRecord,
-    fillDemoData
+    fillDemoData,
+    createEmptyFormData,
+    recordToFormData
   }
 }

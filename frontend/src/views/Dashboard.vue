@@ -1,6 +1,5 @@
 <template>
   <div class="app-container">
-    <!-- Header -->
     <header class="app-header">
       <div class="header-content">
         <div class="logo">
@@ -24,6 +23,14 @@
             </el-button>
           </div>
           <el-button
+            size="small"
+            :icon="Setting"
+            @click="showCategoryManager = !showCategoryManager"
+            :type="showCategoryManager ? 'primary' : 'default'"
+          >
+            类别管理
+          </el-button>
+          <el-button
             v-if="!hasRecords"
             type="primary"
             :icon="DataLine"
@@ -43,7 +50,6 @@
       </div>
     </header>
 
-    <!-- Main Content -->
     <main class="main-content">
       <div v-if="loading" class="loading-state">
         <el-skeleton :rows="10" animated />
@@ -63,27 +69,38 @@
       </div>
       
       <template v-else>
-        <!-- Summary Cards -->
-        <AssetSummary :latest-record="latestRecord" />
+        <transition name="slide">
+          <CategoryManager
+            v-if="showCategoryManager"
+            @categories-updated="handleCategoriesUpdated"
+          />
+        </transition>
 
-        <!-- Input / Edit Form -->
+        <AssetSummary
+          :latest-record="latestRecord"
+          :categories="categories"
+        />
+
         <AssetForm
           :mode="formMode"
           :editing-record="editingRecord"
+          :active-categories="activeCategories"
+          :create-empty-form-data="createEmptyFormData"
+          :record-to-form-data="recordToFormData"
           @submit="handleFormSubmit"
           @fill-demo="handleFillDemo"
           @cancel="handleCancelEdit"
         />
 
-        <!-- Chart -->
         <AssetChart
           :chart-data="chartData"
+          :categories="categories"
           @fill-demo="handleFillDemo"
         />
 
-        <!-- List -->
         <AssetList
           :records="records"
+          :categories="categories"
           @edit="handleStartEdit"
           @delete="handleDelete"
           @fill-demo="handleFillDemo"
@@ -97,7 +114,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { WalletFilled, DataLine, DeleteFilled, SwitchButton } from '@element-plus/icons-vue'
+import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
 import type { AssetFormData, AssetRecord } from '../types'
 import axios from 'axios'
@@ -105,10 +122,13 @@ import AssetSummary from '../components/AssetSummary.vue'
 import AssetForm from '../components/AssetForm.vue'
 import AssetChart from '../components/AssetChart.vue'
 import AssetList from '../components/AssetList.vue'
+import CategoryManager from '../components/CategoryManager.vue'
 
 const router = useRouter()
 const {
   records,
+  categories,
+  activeCategories,
   latestRecord,
   chartData,
   hasRecords,
@@ -118,12 +138,15 @@ const {
   addRecord,
   updateRecord,
   deleteRecord,
-  fillDemoData
+  fillDemoData,
+  createEmptyFormData,
+  recordToFormData
 } = useAssets()
 
 const user = ref<{ id: string; email: string } | null>(null)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRecord = ref<AssetRecord | null>(null)
+const showCategoryManager = ref(false)
 
 const fetchUser = async () => {
   try {
@@ -138,6 +161,10 @@ const fetchUser = async () => {
   } catch (err) {
     // User not logged in, router guard will handle redirect
   }
+}
+
+const handleCategoriesUpdated = async () => {
+  await fetchRecords()
 }
 
 const handleFormSubmit = async (formData: AssetFormData) => {
@@ -163,7 +190,6 @@ const handleFormSubmit = async (formData: AssetFormData) => {
           type: 'error',
           duration: 5000
         })
-        // On conflict, refresh the list and exit edit mode
         await fetchRecords()
         formMode.value = 'create'
         editingRecord.value = null
@@ -177,7 +203,7 @@ const handleFormSubmit = async (formData: AssetFormData) => {
 const handleStartEdit = (record: AssetRecord) => {
   editingRecord.value = record
   formMode.value = 'edit'
-  // Scroll form into view
+  showCategoryManager.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -198,7 +224,6 @@ const handleDelete = async (id: string) => {
       }
     )
     await deleteRecord(id)
-    // If currently editing the deleted record, exit edit mode
     if (editingRecord.value?.id === id) {
       formMode.value = 'create'
       editingRecord.value = null
@@ -230,11 +255,9 @@ const handleClearAll = async () => {
       }
     )
     
-    // Delete all records one by one
     for (const record of records.value) {
       await deleteRecord(record.id)
     }
-    // Exit any active edit mode
     formMode.value = 'create'
     editingRecord.value = null
     ElMessage.success('数据已清空')
@@ -339,6 +362,17 @@ body {
 .loading-state,
 .error-state {
   padding: 40px 0;
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 
 @media (max-width: 768px) {

@@ -24,21 +24,17 @@
       >
         <el-table-column prop="date" label="日期" width="120" sortable />
         
-        <el-table-column label="活钱" min-width="120">
+        <el-table-column
+          v-for="category in displayCategories"
+          :key="category.id"
+          :label="category.name"
+          min-width="120"
+        >
           <template #default="{ row }">
-            <span class="money cash">{{ formatMoney(row.cash) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="长期投资" min-width="120">
-          <template #default="{ row }">
-            <span class="money invest">{{ formatMoney(row.longTermInvest) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="稳定债券" min-width="120">
-          <template #default="{ row }">
-            <span class="money bond">{{ formatMoney(row.stableBond) }}</span>
+            <span
+              class="money"
+              :style="{ color: category.color }"
+            >{{ formatMoney(getCategoryAmount(row, category.id)) }}</span>
           </template>
         </el-table-column>
 
@@ -83,21 +79,31 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Delete, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AssetRecord } from '../types'
+import type { AssetRecord, Category } from '../types'
 
 interface Props {
   records: AssetRecord[]
+  categories: Category[]
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 
 const emit = defineEmits<{
   delete: [id: string]
   edit: [record: AssetRecord]
   'fill-demo': []
 }>()
+
+const displayCategories = computed(() =>
+  props.categories.filter(c => c.isActive)
+)
+
+const getCategoryAmount = (record: AssetRecord, categoryId: string): number => {
+  return record.categoryAmounts?.[categoryId] ?? 0
+}
 
 const formatMoney = (value: number): string => {
   return new Intl.NumberFormat('zh-CN', {
@@ -151,18 +157,6 @@ const handleDelete = (row: AssetRecord) => {
 .money {
   font-family: 'Courier New', monospace;
   font-weight: 600;
-}
-
-.cash {
-  color: #67c23a;
-}
-
-.invest {
-  color: #e6a23c;
-}
-
-.bond {
-  color: #409eff;
 }
 
 .total {
