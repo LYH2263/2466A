@@ -137,3 +137,45 @@ export interface RangeAnalysis {
   monthlyCount: number
   hasSufficientData: boolean
 }
+
+export interface GoalGrowth {
+  monthlyRate: number | null
+  canPredict: boolean
+  reason?: string
+}
+
+export interface GoalPrediction {
+  estimatedDate: string | null
+  daysRemaining: number | null
+  canPredict: boolean
+  reason?: string
+}
+
+export interface GoalProgress {
+  id: string
+  name: string
+  scope: 'total' | 'category'
+  categoryId: string | null
+  targetAmount: number
+  targetDate: string
+  currentValue: number
+  latestDate: string | null
+  progressPercent: number
+  diff: number
+  remaining: number
+  isExceeded: boolean
+  isCompleted: boolean
+  isExpired: boolean
+  growth: GoalGrowth
+  prediction: GoalPrediction
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GoalFormData {
+  name: string
+  targetAmount: number
+  targetDate: string
+  scope: 'total' | 'category'
+  categoryId?: string | null
+}

@@ -21,6 +21,7 @@ model User {
   assetRecords      AssetRecord[]
   refreshTokens     RefreshToken[]
   tags              Tag[]
+  goals             Goal[]
 
   @@map("users")
 }
@@ -39,6 +40,7 @@ model Category {
 
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetItems  AssetItem[]
+  goals       Goal[]
 
   @@index([userId, deletedAt])
   @@unique([userId, name, deletedAt])
@@ -125,4 +127,24 @@ model AssetRecordTag {
   @@index([tagId])
   @@unique([assetRecordId, tagId])
   @@map("asset_record_tags")
+}
+
+model Goal {
+  id              String     @id @default(uuid())
+  userId          String     @map("user_id")
+  name            String     @db.VarChar(50)
+  targetAmount    Decimal    @map("target_amount") @db.Decimal(15, 2)
+  targetDate      DateTime   @map("target_date") @db.Date
+  scope           String     @default("total") @db.VarChar(10)
+  categoryId      String?    @map("category_id")
+  isCompleted     Boolean    @default(false) @map("is_completed")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category        Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, scope])
+  @@map("goals")
 }

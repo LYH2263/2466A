@@ -47,6 +47,14 @@
             标签统计
           </el-button>
           <el-button
+            size="small"
+            :icon="Aim"
+            @click="showGoalManager = !showGoalManager"
+            :type="showGoalManager ? 'primary' : 'default'"
+          >
+            目标管理
+          </el-button>
+          <el-button
             v-if="!hasRecords"
             type="primary"
             :icon="DataLine"
@@ -106,6 +114,23 @@
           />
         </transition>
 
+        <transition name="slide">
+          <GoalManager
+            v-if="showGoalManager"
+            :goals="goals"
+            :active-categories="activeCategories"
+            :add-goal="addGoal"
+            :update-goal="updateGoal"
+            :delete-goal="deleteGoal"
+          />
+        </transition>
+
+        <GoalProgress
+          v-if="goals.length > 0"
+          :goals="goals"
+          :categories="categories"
+        />
+
         <AssetSummary
           :latest-record="latestRecord"
           :categories="categories"
@@ -154,8 +179,9 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis } from '@element-plus/icons-vue'
+import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis, Aim } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
+import { useGoals } from '../composables/useGoals'
 import type { AssetFormData, AssetRecord, AssetTrend } from '../types'
 import axios from 'axios'
 import AssetSummary from '../components/AssetSummary.vue'
@@ -166,6 +192,8 @@ import CategoryManager from '../components/CategoryManager.vue'
 import RangeAnalysis from '../components/RangeAnalysis.vue'
 import TagManager from '../components/TagManager.vue'
 import TagStats from '../components/TagStats.vue'
+import GoalManager from '../components/GoalManager.vue'
+import GoalProgress from '../components/GoalProgress.vue'
 
 const router = useRouter()
 const {
@@ -190,12 +218,21 @@ const {
   fetchRangeAnalysis
 } = useAssets()
 
+const {
+  goals,
+  fetchGoals,
+  addGoal,
+  updateGoal,
+  deleteGoal
+} = useGoals()
+
 const user = ref<{ id: string; email: string } | null>(null)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRecord = ref<AssetRecord | null>(null)
 const showCategoryManager = ref(false)
 const showTagManager = ref(false)
 const showTagStats = ref(false)
+const showGoalManager = ref(false)
 const trendData = ref<AssetTrend | null>(null)
 const tagStatsRef = ref<InstanceType<typeof TagStats> | null>(null)
 
@@ -217,6 +254,7 @@ const fetchUser = async () => {
 const loadAllData = async () => {
   await fetchRecords()
   trendData.value = await fetchTrendAnalysis()
+  await fetchGoals()
 }
 
 const handleCategoriesUpdated = async () => {
@@ -240,6 +278,7 @@ const handleFormSubmit = async (formData: AssetFormData) => {
     if (result.success) {
       ElMessage.success('添加成功')
       trendData.value = await fetchTrendAnalysis()
+      await fetchGoals()
     } else {
       ElMessage.error(result.error || '添加失败')
     }
@@ -251,6 +290,7 @@ const handleFormSubmit = async (formData: AssetFormData) => {
       formMode.value = 'create'
       editingRecord.value = null
       trendData.value = await fetchTrendAnalysis()
+      await fetchGoals()
     } else {
       if (result.conflict) {
         ElNotification({
@@ -275,6 +315,7 @@ const handleStartEdit = (record: AssetRecord) => {
   showCategoryManager.value = false
   showTagManager.value = false
   showTagStats.value = false
+  showGoalManager.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -300,6 +341,7 @@ const handleDelete = async (id: string) => {
       editingRecord.value = null
     }
     trendData.value = await fetchTrendAnalysis()
+    await fetchGoals()
     ElMessage.success('删除成功')
   } catch (err) {
     // Cancelled
