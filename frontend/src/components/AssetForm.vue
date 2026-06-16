@@ -65,6 +65,14 @@
           />
         </el-form-item>
 
+        <el-form-item label="标签">
+          <TagInput
+            v-model="formData.tagIds"
+            :max-tags="5"
+            @tags-updated="$emit('tags-updated')"
+          />
+        </el-form-item>
+
         <el-form-item>
           <el-button type="primary" native-type="submit" :icon="mode === 'create' ? Plus : Edit">
             {{ mode === 'create' ? '新增记录' : '保存修改' }}
@@ -85,6 +93,7 @@
 import { reactive, ref, watch, computed } from 'vue'
 import { Plus, DataLine, Edit, Close } from '@element-plus/icons-vue'
 import type { AssetFormData, AssetRecord, Category } from '../types'
+import TagInput from './TagInput.vue'
 
 interface Props {
   mode?: 'create' | 'edit'
@@ -103,6 +112,7 @@ const emit = defineEmits<{
   submit: [data: AssetFormData]
   'fill-demo': []
   cancel: []
+  'tags-updated': []
 }>()
 
 const formRef = ref()
@@ -121,6 +131,7 @@ watch(
       formData.date = data.date
       formData.categoryAmounts = data.categoryAmounts
       formData.note = data.note
+      formData.tagIds = data.tagIds
       editCount.value = record.editCount || 0
     }
   },
@@ -135,6 +146,7 @@ watch(
       formData.date = data.date
       formData.categoryAmounts = data.categoryAmounts
       formData.note = data.note
+      formData.tagIds = data.tagIds
     }
   },
   { deep: true }
@@ -145,6 +157,7 @@ const resetForm = () => {
   formData.date = data.date
   formData.categoryAmounts = data.categoryAmounts
   formData.note = data.note
+  formData.tagIds = data.tagIds
   editCount.value = 0
 }
 
@@ -166,6 +179,7 @@ const handleSubmit = () => {
     const data = props.createEmptyFormData()
     formData.categoryAmounts = data.categoryAmounts
     formData.note = ''
+    formData.tagIds = []
   }
 }
 

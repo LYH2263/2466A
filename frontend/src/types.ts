@@ -10,6 +10,33 @@ export interface Category {
   updatedAt: string
 }
 
+export interface Tag {
+  id: string
+  name: string
+  color: string
+  recordCount?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TagStat {
+  tagId: string
+  tagName: string
+  tagColor: string
+  recordCount: number
+  totalAssetSum: number
+  avgAsset: number
+  latestTotal: number
+  latestDate: string | null
+}
+
+export interface TagStatistics {
+  tagStats: TagStat[]
+  totalRecords: number
+  taggedRecords: number
+  untaggedCount: number
+}
+
 export interface CategoryAmount {
   categoryId: string
   amount: number
@@ -24,6 +51,7 @@ export interface AssetRecord {
   categoryAmounts: Record<string, number>
   total: number
   note: string
+  tags: Tag[]
   editCount: number
   previousSnapshot: AssetSnapshot | null
   createdAt: string
@@ -45,6 +73,7 @@ export interface AssetFormData {
   date: string
   categoryAmounts: CategoryAmount[]
   note: string
+  tagIds: string[]
 }
 
 export interface TrendCompare {

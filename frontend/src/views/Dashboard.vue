@@ -31,6 +31,22 @@
             类别管理
           </el-button>
           <el-button
+            size="small"
+            :icon="CollectionTag"
+            @click="showTagManager = !showTagManager"
+            :type="showTagManager ? 'primary' : 'default'"
+          >
+            标签管理
+          </el-button>
+          <el-button
+            size="small"
+            :icon="DataAnalysis"
+            @click="showTagStats = !showTagStats"
+            :type="showTagStats ? 'primary' : 'default'"
+          >
+            标签统计
+          </el-button>
+          <el-button
             v-if="!hasRecords"
             type="primary"
             :icon="DataLine"
@@ -76,6 +92,20 @@
           />
         </transition>
 
+        <transition name="slide">
+          <TagManager
+            v-if="showTagManager"
+            @tags-updated="handleTagsUpdated"
+          />
+        </transition>
+
+        <transition name="slide">
+          <TagStats
+            v-if="showTagStats"
+            ref="tagStatsRef"
+          />
+        </transition>
+
         <AssetSummary
           :latest-record="latestRecord"
           :categories="categories"
@@ -96,6 +126,7 @@
           @submit="handleFormSubmit"
           @fill-demo="handleFillDemo"
           @cancel="handleCancelEdit"
+          @tags-updated="handleTagsUpdated"
         />
 
         <AssetChart
@@ -107,9 +138,12 @@
         <AssetList
           :records="records"
           :categories="categories"
+          :tags="tags"
+          :filter-tag-id="filterTagId"
           @edit="handleStartEdit"
           @delete="handleDelete"
           @fill-demo="handleFillDemo"
+          @filter-tag="handleTagFilter"
         />
       </template>
     </main>
@@ -120,7 +154,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting } from '@element-plus/icons-vue'
+import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
 import type { AssetFormData, AssetRecord, AssetTrend } from '../types'
 import axios from 'axios'
@@ -130,12 +164,16 @@ import AssetChart from '../components/AssetChart.vue'
 import AssetList from '../components/AssetList.vue'
 import CategoryManager from '../components/CategoryManager.vue'
 import RangeAnalysis from '../components/RangeAnalysis.vue'
+import TagManager from '../components/TagManager.vue'
+import TagStats from '../components/TagStats.vue'
 
 const router = useRouter()
 const {
   records,
   categories,
   activeCategories,
+  tags,
+  filterTagId,
   latestRecord,
   chartData,
   hasRecords,
@@ -156,7 +194,10 @@ const user = ref<{ id: string; email: string } | null>(null)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRecord = ref<AssetRecord | null>(null)
 const showCategoryManager = ref(false)
+const showTagManager = ref(false)
+const showTagStats = ref(false)
 const trendData = ref<AssetTrend | null>(null)
+const tagStatsRef = ref<InstanceType<typeof TagStats> | null>(null)
 
 const fetchUser = async () => {
   try {
@@ -180,6 +221,17 @@ const loadAllData = async () => {
 
 const handleCategoriesUpdated = async () => {
   await loadAllData()
+}
+
+const handleTagsUpdated = async () => {
+  await loadAllData()
+  if (showTagStats && tagStatsRef.value) {
+    await tagStatsRef.value.loadStatistics()
+  }
+}
+
+const handleTagFilter = async (tagId: string | null) => {
+  await fetchRecords(tagId)
 }
 
 const handleFormSubmit = async (formData: AssetFormData) => {
@@ -221,6 +273,8 @@ const handleStartEdit = (record: AssetRecord) => {
   editingRecord.value = record
   formMode.value = 'edit'
   showCategoryManager.value = false
+  showTagManager.value = false
+  showTagStats.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -256,6 +310,9 @@ const handleFillDemo = async () => {
   try {
     await fillDemoData()
     trendData.value = await fetchTrendAnalysis()
+    if (tagStatsRef.value) {
+      await tagStatsRef.value.loadStatistics()
+    }
     ElMessage.success('示例数据已填充')
   } catch (err: any) {
     ElMessage.error(err.message || '填充失败')
@@ -280,6 +337,9 @@ const handleClearAll = async () => {
     formMode.value = 'create'
     editingRecord.value = null
     trendData.value = await fetchTrendAnalysis()
+    if (tagStatsRef.value) {
+      await tagStatsRef.value.loadStatistics()
+    }
     ElMessage.success('数据已清空')
   } catch (err) {
     // Cancelled

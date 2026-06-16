@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import axios from 'axios'
-import type { AssetRecord, AssetFormData, Category, CategoryAmount, AssetTrend, RangeAnalysis } from '../types'
+import type { AssetRecord, AssetFormData, Category, CategoryAmount, AssetTrend, RangeAnalysis, Tag } from '../types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -69,6 +69,7 @@ const mapRecord = (r: any, categories: Category[]): AssetRecord => {
     stableBond: stableBond,
     total: Number(r.total),
     categoryAmounts: r.categoryAmounts || {},
+    tags: r.tags || [],
     editCount: r.editCount ?? 0,
     previousSnapshot: r.previousSnapshot ?? null,
     updatedAt: r.updatedAt ?? r.createdAt
@@ -78,6 +79,8 @@ const mapRecord = (r: any, categories: Category[]): AssetRecord => {
 export function useAssets() {
   const records = ref<AssetRecord[]>([])
   const categories = ref<Category[]>([])
+  const tags = ref<Tag[]>([])
+  const filterTagId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref('')
 
@@ -91,14 +94,24 @@ export function useAssets() {
     return map
   })
 
-  const fetchRecords = async () => {
+  const tagMap = computed(() => {
+    const map = new Map<string, Tag>()
+    tags.value.forEach(t => map.set(t.id, t))
+    return map
+  })
+
+  const fetchRecords = async (tagId: string | null = null) => {
     loading.value = true
     error.value = ''
+    filterTagId.value = tagId
     try {
-      const response = await api.get('/api/assets', {
-        params: { includeInactive: true }
-      })
+      const params: any = { includeInactive: true }
+      if (tagId) {
+        params.tagId = tagId
+      }
+      const response = await api.get('/api/assets', { params })
       categories.value = response.data.categories || []
+      tags.value = response.data.tags || []
       records.value = response.data.records.map((r: any) => mapRecord(r, categories.value))
     } catch (err: any) {
       error.value = err.response?.data?.error || '获取数据失败'
@@ -115,7 +128,8 @@ export function useAssets() {
         categoryId: c.id,
         amount: 0
       })),
-      note: ''
+      note: '',
+      tagIds: []
     }
   }
 
@@ -127,10 +141,11 @@ export function useAssets() {
           categoryId: ca.categoryId,
           amount: ca.amount || 0
         })),
-        note: formData.note || undefined
+        note: formData.note || undefined,
+        tagIds: formData.tagIds.length > 0 ? formData.tagIds : undefined
       }
       await api.post('/api/assets', payload)
-      await fetchRecords()
+      await fetchRecords(filterTagId.value)
       return { success: true }
     } catch (err: any) {
       const message = err.response?.data?.error || '添加失败'
@@ -147,7 +162,8 @@ export function useAssets() {
     return {
       date: record.date,
       categoryAmounts,
-      note: record.note || ''
+      note: record.note || '',
+      tagIds: record.tags ? record.tags.map(t => t.id) : []
     }
   }
 
@@ -167,12 +183,17 @@ export function useAssets() {
       newCategoryAmounts[ca.categoryId] = ca.amount || 0
     }
 
+    const newTags = formData.tagIds
+      .map(id => tagMap.value.get(id))
+      .filter((t): t is Tag => t !== undefined)
+
     const updatedOptimistic: AssetRecord = {
       ...originalRecords[originalIndex],
       date: formData.date,
       categoryAmounts: newCategoryAmounts,
       total,
       note: formData.note,
+      tags: newTags,
       editCount: originalRecords[originalIndex].editCount + 1,
       updatedAt: new Date().toISOString()
     }
@@ -188,7 +209,8 @@ export function useAssets() {
           categoryId: ca.categoryId,
           amount: ca.amount || 0
         })),
-        note: formData.note || undefined
+        note: formData.note || undefined,
+        tagIds: formData.tagIds
       }
 
       const response = await api.put(`/api/assets/${id}`, payload)
@@ -211,7 +233,7 @@ export function useAssets() {
   const deleteRecord = async (id: string) => {
     try {
       await api.delete(`/api/assets/${id}`)
-      await fetchRecords()
+      await fetchRecords(filterTagId.value)
     } catch (err: any) {
       throw new Error(err.response?.data?.error || '删除失败')
     }
@@ -285,6 +307,9 @@ export function useAssets() {
     categories,
     activeCategories,
     categoryMap,
+    tags,
+    tagMap,
+    filterTagId,
     latestRecord,
     chartData,
     hasRecords,

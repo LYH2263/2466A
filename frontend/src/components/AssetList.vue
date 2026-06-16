@@ -3,8 +3,40 @@
     <el-card class="list-card">
       <template #header>
         <div class="card-header">
-          <span>资产历史记录</span>
-          <el-tag v-if="records.length > 0" type="info">共 {{ records.length }} 条</el-tag>
+          <div class="header-left">
+            <span>资产历史记录</span>
+            <el-tag v-if="records.length > 0" type="info">共 {{ records.length }} 条</el-tag>
+            <el-tag
+              v-if="filterTagId"
+              type="success"
+              closable
+              @close="handleClearFilter"
+            >
+              已筛选: {{ filterTagName }}
+            </el-tag>
+          </div>
+          <div class="header-right">
+            <el-select
+              v-model="selectedFilterTagId"
+              placeholder="按标签筛选"
+              clearable
+              style="width: 200px; margin-right: 10px;"
+              @change="handleTagFilterChange"
+            >
+              <el-option
+                v-for="tag in tags"
+                :key="tag.id"
+                :value="tag.id"
+                :label="tag.name"
+              >
+                <div class="filter-option">
+                  <span class="color-dot" :style="{ backgroundColor: tag.color }" />
+                  <span>{{ tag.name }}</span>
+                  <span class="tag-count">({{ tag.recordCount ?? 0 }} 条)</span>
+                </div>
+              </el-option>
+            </el-select>
+          </div>
         </div>
       </template>
 
@@ -46,6 +78,24 @@
 
         <el-table-column prop="note" label="备注" min-width="150" show-overflow-tooltip />
 
+        <el-table-column label="标签" min-width="200">
+          <template #default="{ row }">
+            <div v-if="row.tags && row.tags.length > 0" class="tag-list">
+              <el-tag
+                v-for="tag in row.tags"
+                :key="tag.id"
+                :style="{ backgroundColor: tag.color, borderColor: tag.color }"
+                size="small"
+                class="record-tag"
+                @click="handleTagClick(tag.id)"
+              >
+                {{ tag.name }}
+              </el-tag>
+            </div>
+            <span v-else class="no-tags">—</span>
+          </template>
+        </el-table-column>
+
         <el-table-column label="编辑次数" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.editCount > 0" type="warning" size="small">
@@ -79,14 +129,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Delete, Edit } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { AssetRecord, Category } from '../types'
+import type { AssetRecord, Category, Tag } from '../types'
 
 interface Props {
   records: AssetRecord[]
   categories: Category[]
+  tags: Tag[]
+  filterTagId: string | null
 }
 
 const props = defineProps<Props>()
@@ -95,11 +147,43 @@ const emit = defineEmits<{
   delete: [id: string]
   edit: [record: AssetRecord]
   'fill-demo': []
+  'filter-tag': [tagId: string | null]
 }>()
+
+const selectedFilterTagId = ref<string | null>(props.filterTagId)
 
 const displayCategories = computed(() =>
   props.categories.filter(c => c.isActive)
 )
+
+const filterTagName = computed(() => {
+  if (!props.filterTagId) return ''
+  const tag = props.tags.find(t => t.id === props.filterTagId)
+  return tag?.name || ''
+})
+
+const handleTagFilterChange = (value: string | null) => {
+  selectedFilterTagId.value = value
+  emit('filter-tag', value)
+}
+
+const setFilterTag = (tagId: string) => {
+  selectedFilterTagId.value = tagId
+  emit('filter-tag', tagId)
+}
+
+const handleTagClick = (tagId: string) => {
+  setFilterTag(tagId)
+}
+
+const handleClearFilter = () => {
+  selectedFilterTagId.value = null
+  emit('filter-tag', null)
+}
+
+watch(() => props.filterTagId, (newVal) => {
+  selectedFilterTagId.value = newVal
+})
 
 const getCategoryAmount = (record: AssetRecord, categoryId: string): number => {
   return record.categoryAmounts?.[categoryId] ?? 0
@@ -148,6 +232,62 @@ const handleDelete = (row: AssetRecord) => {
   align-items: center;
   font-size: 16px;
   font-weight: 600;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.tag-count {
+  color: #909399;
+  font-size: 12px;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.record-tag {
+  color: white !important;
+  font-weight: 500;
+  border: 1px solid;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.record-tag:hover {
+  opacity: 0.8;
+}
+
+.no-tags {
+  color: #909399;
 }
 
 .empty-state {

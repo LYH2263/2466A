@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../index.js';
 import jwt from 'jsonwebtoken';
+import { MAX_TAGS_PER_RECORD } from './tags.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -32,11 +33,18 @@ const categoryAmountSchema = z.object({
 const assetSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式必须为 YYYY-MM-DD'),
   categoryAmounts: z.array(categoryAmountSchema).min(1, '至少输入一项资产金额'),
-  note: z.string().max(100, '备注最多100字').optional()
+  note: z.string().max(100, '备注最多100字').optional(),
+  tagIds: z.array(z.string()).max(MAX_TAGS_PER_RECORD, `单条记录最多 ${MAX_TAGS_PER_RECORD} 个标签`).optional()
 }).refine((data) => {
   return data.categoryAmounts.some(ca => ca.amount > 0);
 }, {
   message: '至少输入一项大于0的资产金额'
+}).refine((data) => {
+  const uniqueTagIds = new Set(data.tagIds || []);
+  return (data.tagIds?.length || 0) === uniqueTagIds.size;
+}, {
+  message: '标签不能重复',
+  path: ['tagIds']
 });
 
 async function getActiveCategories(userId: string) {
@@ -77,12 +85,24 @@ function buildCategoryMap(assetItems: any[], allCategories: any[]) {
 router.get('/', authMiddleware, async (req: any, res) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';
+    const tagFilter = req.query.tagId ? String(req.query.tagId) : null;
 
-    const [records, allCategories] = await Promise.all([
+    const whereCondition: any = { userId: req.userId };
+    
+    if (tagFilter) {
+      whereCondition.tagLinks = {
+        some: { tagId: tagFilter }
+      };
+    }
+
+    const [records, allCategories, allTags] = await Promise.all([
       prisma.assetRecord.findMany({
-        where: { userId: req.userId },
+        where: whereCondition,
         include: {
-          assetItems: true
+          assetItems: true,
+          tagLinks: {
+            include: { tag: true }
+          }
         },
         orderBy: { date: 'desc' }
       }),
@@ -93,6 +113,10 @@ router.get('/', authMiddleware, async (req: any, res) => {
           ...(includeInactive ? {} : { isActive: true })
         },
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+      }),
+      prisma.tag.findMany({
+        where: { userId: req.userId },
+        orderBy: [{ createdAt: 'asc' }]
       })
     ]);
 
@@ -106,19 +130,28 @@ router.get('/', authMiddleware, async (req: any, res) => {
         allCategories
       );
 
+      const tags = record.tagLinks.map((tl: any) => ({
+        id: tl.tag.id,
+        name: tl.tag.name,
+        color: tl.tag.color
+      }));
+
       return {
         ...record,
         categoryAmounts,
         cash: legacyFields.cash,
         longTermInvest: legacyFields.longTermInvest,
         stableBond: legacyFields.stableBond,
-        assetItems: undefined
+        tags,
+        assetItems: undefined,
+        tagLinks: undefined
       };
     });
 
     res.json({
       records: recordsWithCategoryAmounts,
-      categories: allCategories
+      categories: allCategories,
+      tags: allTags
     });
   } catch (error) {
     console.error('Get assets error:', error);
@@ -136,6 +169,20 @@ router.post('/', authMiddleware, async (req: any, res) => {
     for (const ca of data.categoryAmounts) {
       if (!activeCategoryIds.has(ca.categoryId)) {
         return res.status(400).json({ error: '包含无效或已停用的类别' });
+      }
+    }
+
+    if (data.tagIds && data.tagIds.length > 0) {
+      const validTags = await prisma.tag.findMany({
+        where: {
+          userId: req.userId,
+          id: { in: data.tagIds }
+        },
+        select: { id: true }
+      });
+
+      if (validTags.length !== data.tagIds.length) {
+        return res.status(400).json({ error: '包含无效的标签' });
       }
     }
 
@@ -165,6 +212,15 @@ router.post('/', authMiddleware, async (req: any, res) => {
           }))
       });
 
+      if (data.tagIds && data.tagIds.length > 0) {
+        await tx.assetRecordTag.createMany({
+          data: data.tagIds.map(tagId => ({
+            assetRecordId: newRecord.id,
+            tagId
+          }))
+        });
+      }
+
       return newRecord;
     });
 
@@ -173,11 +229,17 @@ router.post('/', authMiddleware, async (req: any, res) => {
       categoryAmounts[ca.categoryId] = ca.amount;
     }
 
+    const tags = data.tagIds ? await prisma.tag.findMany({
+      where: { id: { in: data.tagIds } },
+      select: { id: true, name: true, color: true }
+    }) : [];
+
     res.status(201).json({ 
       message: '添加成功',
       record: {
         ...record,
-        categoryAmounts
+        categoryAmounts,
+        tags
       }
     });
   } catch (error) {
@@ -196,7 +258,7 @@ router.put('/:id', authMiddleware, async (req: any, res) => {
 
     const existingRecord = await prisma.assetRecord.findFirst({
       where: { id, userId: req.userId },
-      include: { assetItems: true }
+      include: { assetItems: true, tagLinks: true }
     });
 
     if (!existingRecord) {
@@ -213,6 +275,20 @@ router.put('/:id', authMiddleware, async (req: any, res) => {
     for (const ca of data.categoryAmounts) {
       if (!activeCategoryIds.has(ca.categoryId)) {
         return res.status(400).json({ error: '包含无效或已停用的类别' });
+      }
+    }
+
+    if (data.tagIds && data.tagIds.length > 0) {
+      const validTags = await prisma.tag.findMany({
+        where: {
+          userId: req.userId,
+          id: { in: data.tagIds }
+        },
+        select: { id: true }
+      });
+
+      if (validTags.length !== data.tagIds.length) {
+        return res.status(400).json({ error: '包含无效的标签' });
       }
     }
 
@@ -233,6 +309,7 @@ router.put('/:id', authMiddleware, async (req: any, res) => {
       stableBond: Number(existingRecord.stableBond),
       total: Number(existingRecord.total),
       note: existingRecord.note || null,
+      tagIds: existingRecord.tagLinks.map((tl: any) => tl.tagId),
       editedAt: new Date().toISOString()
     };
 
@@ -250,6 +327,19 @@ router.put('/:id', authMiddleware, async (req: any, res) => {
             amount: ca.amount
           }))
       });
+
+      await tx.assetRecordTag.deleteMany({
+        where: { assetRecordId: id }
+      });
+
+      if (data.tagIds && data.tagIds.length > 0) {
+        await tx.assetRecordTag.createMany({
+          data: data.tagIds.map(tagId => ({
+            assetRecordId: id,
+            tagId
+          }))
+        });
+      }
 
       return await tx.assetRecord.update({
         where: { id },
@@ -271,11 +361,17 @@ router.put('/:id', authMiddleware, async (req: any, res) => {
       categoryAmounts[ca.categoryId] = ca.amount;
     }
 
+    const tags = data.tagIds ? await prisma.tag.findMany({
+      where: { id: { in: data.tagIds } },
+      select: { id: true, name: true, color: true }
+    }) : [];
+
     res.json({
       message: '编辑成功',
       record: {
         ...updatedRecord,
-        categoryAmounts
+        categoryAmounts,
+        tags
       }
     });
   } catch (error) {

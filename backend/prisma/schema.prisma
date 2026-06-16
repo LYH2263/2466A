@@ -20,6 +20,7 @@ model User {
   categories        Category[]
   assetRecords      AssetRecord[]
   refreshTokens     RefreshToken[]
+  tags              Tag[]
 
   @@map("users")
 }
@@ -74,22 +75,54 @@ model RefreshToken {
 }
 
 model AssetRecord {
-  id                String      @id @default(uuid())
-  userId            String      @map("user_id")
-  date              DateTime    @db.Date
-  cash              Decimal     @db.Decimal(15, 2)
-  longTermInvest    Decimal     @map("long_term_invest") @db.Decimal(15, 2)
-  stableBond        Decimal     @map("stable_bond") @db.Decimal(15, 2)
-  total             Decimal     @db.Decimal(15, 2)
-  note              String?     @db.VarChar(100)
-  editCount         Int         @default(0) @map("edit_count")
-  previousSnapshot  Json?       @map("previous_snapshot")
-  createdAt         DateTime    @default(now()) @map("created_at")
-  updatedAt         DateTime    @updatedAt @map("updated_at")
+  id                String            @id @default(uuid())
+  userId            String            @map("user_id")
+  date              DateTime          @db.Date
+  cash              Decimal           @db.Decimal(15, 2)
+  longTermInvest    Decimal           @map("long_term_invest") @db.Decimal(15, 2)
+  stableBond        Decimal           @map("stable_bond") @db.Decimal(15, 2)
+  total             Decimal           @db.Decimal(15, 2)
+  note              String?           @db.VarChar(100)
+  editCount         Int               @default(0) @map("edit_count")
+  previousSnapshot  Json?             @map("previous_snapshot")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
 
-  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   assetItems        AssetItem[]
+  tagLinks          AssetRecordTag[]
 
   @@index([userId])
   @@map("asset_records")
+}
+
+model Tag {
+  id        String            @id @default(uuid())
+  userId    String            @map("user_id")
+  name      String            @db.VarChar(30)
+  color     String            @db.VarChar(7)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tagLinks  AssetRecordTag[]
+
+  @@index([userId])
+  @@unique([userId, name])
+  @@map("tags")
+}
+
+model AssetRecordTag {
+  id            String      @id @default(uuid())
+  assetRecordId String      @map("asset_record_id")
+  tagId         String      @map("tag_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  assetRecord   AssetRecord @relation(fields: [assetRecordId], references: [id], onDelete: Cascade)
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@index([assetRecordId])
+  @@index([tagId])
+  @@unique([assetRecordId, tagId])
+  @@map("asset_record_tags")
 }
