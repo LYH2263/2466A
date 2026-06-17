@@ -79,6 +79,14 @@
             收益分析
           </el-button>
           <el-button
+            size="small"
+            :icon="Files"
+            @click="showBackupRestore = !showBackupRestore"
+            :type="showBackupRestore ? 'primary' : 'default'"
+          >
+            备份恢复
+          </el-button>
+          <el-button
             v-if="!hasRecords"
             type="primary"
             :icon="DataLine"
@@ -180,6 +188,13 @@
         </transition>
 
         <transition name="slide">
+          <BackupRestore
+            v-if="showBackupRestore"
+            @data-restored="handleDataRestored"
+          />
+        </transition>
+
+        <transition name="slide">
           <CashFlowManager
             v-if="showCashFlowManager"
             ref="cashFlowManagerRef"
@@ -248,7 +263,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis, Aim, CreditCard, TrendCharts, Wallet } from '@element-plus/icons-vue'
+import { WalletFilled, DataLine, DeleteFilled, SwitchButton, Setting, CollectionTag, DataAnalysis, Aim, CreditCard, TrendCharts, Wallet, Files } from '@element-plus/icons-vue'
 import { useAssets } from '../composables/useAssets'
 import { useGoals } from '../composables/useGoals'
 import { useLiabilities } from '../composables/useLiabilities'
@@ -270,6 +285,7 @@ import LiabilityList from '../components/LiabilityList.vue'
 import AssetAllocation from '../components/AssetAllocation.vue'
 import ReturnsAnalysis from '../components/ReturnsAnalysis.vue'
 import CashFlowManager from '../components/CashFlowManager.vue'
+import BackupRestore from '../components/BackupRestore.vue'
 
 const router = useRouter()
 const {
@@ -331,6 +347,7 @@ const showGoalManager = ref(false)
 const showLiabilityManager = ref(false)
 const showReturnsAnalysis = ref(false)
 const showCashFlowManager = ref(false)
+const showBackupRestore = ref(false)
 const cashFlowManagerRef = ref<InstanceType<typeof CashFlowManager> | null>(null)
 const trendData = ref<AssetTrend | null>(null)
 const netWorthSeries = ref<NetWorthTimePoint[]>([])
@@ -373,6 +390,14 @@ const handleAllocationUpdated = async () => {
 
 const handleCashFlowsUpdated = async () => {
   trendData.value = await fetchTrendAnalysis()
+}
+
+const handleDataRestored = async () => {
+  showBackupRestore.value = false
+  await loadAllData()
+  if (showTagStats && tagStatsRef.value) {
+    await tagStatsRef.value.loadStatistics()
+  }
 }
 
 const handleTagsUpdated = async () => {

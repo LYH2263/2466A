@@ -14,6 +14,7 @@ import liabilityRoutes from './routes/liabilities.js';
 import allocationRoutes from './routes/allocations.js';
 import cashFlowRoutes from './routes/cashFlows.js';
 import returnsRoutes from './routes/returns.js';
+import backupRoutes from './routes/backup.js';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -68,6 +69,7 @@ app.use('/api/liabilities', liabilityRoutes);
 app.use('/api/allocations', allocationRoutes);
 app.use('/api/cash-flows', cashFlowRoutes);
 app.use('/api/returns', returnsRoutes);
+app.use('/api/backup', backupRoutes);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

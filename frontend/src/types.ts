@@ -371,3 +371,83 @@ export const CASH_FLOW_TYPE_COLORS: Record<CashFlowType, string> = {
   interest: '#909399',
   other: '#909399'
 }
+
+export type BackupIntegrity = 'valid' | 'tampered' | 'tampered_allowed'
+export type RestoreStrategy = 'merge' | 'overwrite'
+
+export interface BackupDiffItem {
+  total: number
+  toAdd: number
+  toUpdate: number
+  toDelete: number
+  conflicts: string[]
+}
+
+export interface BackupDiff {
+  categories: BackupDiffItem
+  tags: BackupDiffItem
+  assetRecords: BackupDiffItem
+  assetItems: BackupDiffItem
+  assetRecordTags: BackupDiffItem
+  liabilityRecords: BackupDiffItem
+  goals: BackupDiffItem
+  targetAllocation: BackupDiffItem
+  cashFlows: BackupDiffItem
+  warnings: string[]
+}
+
+export interface BackupStats {
+  categories: number
+  tags: number
+  assetRecords: number
+  assetItems: number
+  assetRecordTags: number
+  liabilityRecords: number
+  goals: number
+  targetAllocation: number
+  cashFlows: number
+}
+
+export interface BackupExportedBy {
+  userId: string
+  userEmail: string
+}
+
+export interface BackupValidateResponse {
+  valid: boolean
+  backup: {
+    version: string
+    exportedAt: string
+    exportedBy: BackupExportedBy
+    stats: BackupStats
+  }
+  integrity: BackupIntegrity
+  integrityWarnings: string[]
+  diff: BackupDiff
+  backupVersion?: string
+  currentVersion?: string
+  versionError?: string
+  tampered?: boolean
+}
+
+export interface BackupImportResponse {
+  success: boolean
+  message: string
+  strategy: RestoreStrategy
+  integrity: BackupIntegrity
+  rollback?: boolean
+  detail?: string
+}
+
+export interface BackupSchemaInfo {
+  version: string
+  maxSizeMB: number
+  supportedStrategies: RestoreStrategy[]
+  entities: string[]
+}
+
+export interface BackupEntityLabel {
+  key: keyof BackupDiff
+  label: string
+  icon: string
+}
