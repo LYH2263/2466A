@@ -292,7 +292,7 @@ async function getCurrentCounts(userId: string) {
   const liabilityRecords = await prisma.liabilityRecord.findMany({ where: { userId }, select: { id: true, name: true, date: true } });
   const goals = await prisma.goal.findMany({ where: { userId }, select: { id: true, name: true } });
   const targetAllocation = await prisma.targetAllocation.findUnique({ where: { userId }, select: { id: true } });
-  const cashFlows = await prisma.cashFlow.findMany({ where: { userId }, select: { id: true, date: true, type: true } });
+  const cashFlows = await prisma.cashFlow.findMany({ where: { userId }, select: { id: true, assetRecordId: true, date: true, amount: true, type: true, note: true } });
 
   return {
     categories,
@@ -350,6 +350,19 @@ function computeDiff(backup: any, current: any, strategy: 'merge' | 'overwrite')
   const currentLiabById = new Map<string, any>(current.liabilityRecords.map((r: any) => [r.id, r]));
   const currentGoalsByName = new Map<string, any>(current.goals.map((g: any) => [g.name, g]));
   const currentGoalsById = new Map<string, any>(current.goals.map((g: any) => [g.id, g]));
+  const currentCfByKey = new Map<string, any>(
+    current.cashFlows.map((cf: any) => {
+      const dk = new Date(cf.date).toISOString().split('T')[0];
+      let key;
+      if (cf.assetRecordId) {
+        key = 'AR:' + cf.assetRecordId + '|' + dk + '|' + cf.type + '|' + String(cf.amount);
+      } else {
+        key = 'I:' + dk + '|' + cf.type + '|' + String(cf.amount) + '|' + (cf.note || '');
+      }
+      return [key, cf] as [string, any];
+    })
+  );
+  const currentCfById = new Map<string, any>(current.cashFlows.map((cf: any) => [cf.id, cf]));
 
   function calcSimpleItem(
     backupList: any[],
@@ -505,12 +518,61 @@ function computeDiff(backup: any, current: any, strategy: 'merge' | 'overwrite')
     conflicts: [],
   };
 
+  const backupDateToCurrentRecId: Record<string, string> = {};
+  for (const r of backup.data.assetRecords) {
+    const dateKey = new Date(r.date).toISOString().split('T')[0];
+    const existing = currentRecordsByDate.get(dateKey);
+    if (existing) {
+      backupDateToCurrentRecId[r.id] = existing.id;
+    }
+  }
+
+  let cfToAdd = 0;
+  let cfToUpdate = 0;
+  const cfConflicts: string[] = [];
+  const processedCfIds = new Set<string>();
+  for (const cf of backup.data.cashFlows) {
+    const dk = new Date(cf.date).toISOString().split('T')[0];
+    let bkKey;
+    if (cf.assetRecordId) {
+      const mappedArId = backupDateToCurrentRecId[cf.assetRecordId] || cf.assetRecordId;
+      bkKey = 'AR:' + mappedArId + '|' + dk + '|' + cf.type + '|' + String(cf.amount);
+    } else {
+      bkKey = 'I:' + dk + '|' + cf.type + '|' + String(cf.amount) + '|' + (cf.note || '');
+    }
+    const existingByKey = currentCfByKey.get(bkKey);
+    const existingById = currentCfById.get(cf.id);
+    const noteText = cf.note || '无备注';
+    const showKey = dk + ' ' + cf.type + ' ¥' + String(cf.amount) + '（' + noteText + '）';
+
+    if (strategy === 'overwrite') {
+      if (existingById || existingByKey) {
+        cfToUpdate++;
+      } else {
+        cfToAdd++;
+      }
+    } else {
+      if (existingByKey) {
+        cfToUpdate++;
+        if (existingByKey.id !== cf.id) {
+          cfConflicts.push('资金流: ' + showKey + '（合并时将更新现有记录，避免重复叠加）');
+        }
+      } else if (existingById) {
+        cfToUpdate++;
+      } else {
+        cfToAdd++;
+      }
+    }
+    processedCfIds.add(cf.id);
+  }
   const cashFlowsDiff: DiffItem = {
     total: backup.data.cashFlows.length,
-    toAdd: backup.data.cashFlows.length,
-    toUpdate: 0,
-    toDelete: strategy === 'overwrite' ? current.cashFlows.length : 0,
-    conflicts: [],
+    toAdd: cfToAdd,
+    toUpdate: cfToUpdate,
+    toDelete: strategy === 'overwrite'
+      ? current.cashFlows.filter((c: any) => !processedCfIds.has(c.id)).length
+      : 0,
+    conflicts: cfConflicts,
   };
 
   if (strategy === 'overwrite') {
@@ -523,6 +585,7 @@ function computeDiff(backup: any, current: any, strategy: 'merge' | 'overwrite')
   allConflicts.push(...assetRecordsDiff.conflicts);
   allConflicts.push(...liabilityRecordsDiff.conflicts);
   allConflicts.push(...goalsDiff.conflicts);
+  allConflicts.push(...cashFlowsDiff.conflicts);
   if (allConflicts.length > 5) {
     warnings.push('共有 ' + allConflicts.length + ' 处冲突，以上仅显示部分');
   }
@@ -713,8 +776,34 @@ function regenerateIdsAndRemap(backupData: any, current: any, strategy: 'merge' 
   for (const link of backupData.assetRecordTags) {
     idMap[link.id] = newId();
   }
+
+  const currentCfByKey = new Map<string, any>(
+    current.cashFlows.map((cf: any) => {
+      const dk = new Date(cf.date).toISOString().split('T')[0];
+      let key;
+      if (cf.assetRecordId) {
+        key = 'AR:' + cf.assetRecordId + '|' + dk + '|' + cf.type + '|' + String(cf.amount);
+      } else {
+        key = 'I:' + dk + '|' + cf.type + '|' + String(cf.amount) + '|' + (cf.note || '');
+      }
+      return [key, cf];
+    })
+  );
   for (const cf of backupData.cashFlows) {
-    idMap[cf.id] = newId();
+    const dk = new Date(cf.date).toISOString().split('T')[0];
+    let key;
+    if (cf.assetRecordId) {
+      const mappedArId = idMap[cf.assetRecordId] || cf.assetRecordId;
+      key = 'AR:' + mappedArId + '|' + dk + '|' + cf.type + '|' + String(cf.amount);
+    } else {
+      key = 'I:' + dk + '|' + cf.type + '|' + String(cf.amount) + '|' + (cf.note || '');
+    }
+    const existing = currentCfByKey.get(key);
+    if (existing && strategy === 'merge') {
+      idMap[cf.id] = existing.id;
+    } else {
+      idMap[cf.id] = newId();
+    }
   }
 
   return idMap;
@@ -823,6 +912,45 @@ router.post('/import', authMiddleware, async (req: any, res) => {
         if (existingGoalsToDelete.size > 0) {
           await tx.goal.deleteMany({
             where: { id: { in: Array.from(existingGoalsToDelete) } },
+          });
+        }
+        const existingCfToDelete = new Set<string>();
+        const processedRecordIdsForCf: Record<string, string> = {};
+        for (const rec of backup.data.assetRecords) {
+          const dateKey = new Date(rec.date).toISOString().split('T')[0];
+          for (const cr of current.assetRecords) {
+            if (new Date(cr.date).toISOString().split('T')[0] === dateKey) {
+              processedRecordIdsForCf[rec.id] = cr.id;
+              break;
+            }
+          }
+        }
+        for (const cf of backup.data.cashFlows) {
+          const dk = new Date(cf.date).toISOString().split('T')[0];
+          let bkKey;
+          if (cf.assetRecordId) {
+            const mappedArId = processedRecordIdsForCf[cf.assetRecordId] || cf.assetRecordId;
+            bkKey = 'AR:' + mappedArId + '|' + dk + '|' + cf.type + '|' + String(cf.amount);
+          } else {
+            bkKey = 'I:' + dk + '|' + cf.type + '|' + String(cf.amount) + '|' + (cf.note || '');
+          }
+          for (const ccf of current.cashFlows) {
+            const cdk = new Date(ccf.date).toISOString().split('T')[0];
+            let cKey;
+            if (ccf.assetRecordId) {
+              cKey = 'AR:' + ccf.assetRecordId + '|' + cdk + '|' + ccf.type + '|' + String(ccf.amount);
+            } else {
+              cKey = 'I:' + cdk + '|' + ccf.type + '|' + String(ccf.amount) + '|' + (ccf.note || '');
+            }
+            if (cKey === bkKey) {
+              existingCfToDelete.add(ccf.id);
+              break;
+            }
+          }
+        }
+        if (existingCfToDelete.size > 0) {
+          await tx.cashFlow.deleteMany({
+            where: { id: { in: Array.from(existingCfToDelete) } },
           });
         }
 
@@ -971,15 +1099,49 @@ router.post('/import', authMiddleware, async (req: any, res) => {
       }
 
       if (backup.data.targetAllocation) {
+        const rawAlloc = backup.data.targetAllocation.allocations;
+        let mappedAlloc: any = rawAlloc;
+        if (Array.isArray(rawAlloc)) {
+          mappedAlloc = rawAlloc.map((item: any) => {
+            if (item && typeof item === 'object') {
+              const newItem: any = { ...item };
+              if (newItem.categoryId && idMap[newItem.categoryId]) {
+                newItem.categoryId = idMap[newItem.categoryId];
+              }
+              for (const k of Object.keys(newItem)) {
+                if (idMap[newItem[k]]) {
+                  newItem[k] = idMap[newItem[k]];
+                }
+              }
+              return newItem;
+            }
+            return item;
+          });
+        } else if (rawAlloc && typeof rawAlloc === 'object') {
+          mappedAlloc = {};
+          for (const key of Object.keys(rawAlloc)) {
+            const newKey = idMap[key] || key;
+            const val = rawAlloc[key];
+            if (val && typeof val === 'object' && !Array.isArray(val)) {
+              const newVal: any = { ...val };
+              if (newVal.categoryId && idMap[newVal.categoryId]) {
+                newVal.categoryId = idMap[newVal.categoryId];
+              }
+              mappedAlloc[newKey] = newVal;
+            } else {
+              mappedAlloc[newKey] = val;
+            }
+          }
+        }
         await tx.targetAllocation.upsert({
           where: { userId },
           create: {
             userId,
-            allocations: backup.data.targetAllocation.allocations,
+            allocations: mappedAlloc,
             warningThreshold: Number(backup.data.targetAllocation.warningThreshold ?? 10),
           },
           update: {
-            allocations: backup.data.targetAllocation.allocations,
+            allocations: mappedAlloc,
             warningThreshold: Number(backup.data.targetAllocation.warningThreshold ?? 10),
           },
         });
@@ -989,16 +1151,19 @@ router.post('/import', authMiddleware, async (req: any, res) => {
         const newAssetRecordId = cf.assetRecordId
           ? (processedRecords[cf.assetRecordId] || idMap[cf.assetRecordId])
           : null;
-        await tx.cashFlow.create({
-          data: {
-            id: idMap[cf.id],
-            userId,
-            assetRecordId: newAssetRecordId,
-            date: new Date(cf.date),
-            amount: Number(cf.amount),
-            type: cf.type,
-            note: cf.note ?? null,
-          },
+        const newCfId = idMap[cf.id];
+        const cfData = {
+          userId,
+          assetRecordId: newAssetRecordId,
+          date: new Date(cf.date),
+          amount: Number(cf.amount),
+          type: cf.type,
+          note: cf.note ?? null,
+        };
+        await tx.cashFlow.upsert({
+          where: { id: newCfId },
+          create: { id: newCfId, ...cfData },
+          update: cfData,
         });
       }
 
