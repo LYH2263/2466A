@@ -1,5 +1,5 @@
 <template>
-  <div class="asset-form">
+  <div id="asset-form-container" class="asset-form">
     <el-card class="form-card">
       <template #header>
         <div class="card-header">
@@ -92,6 +92,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, computed } from 'vue'
 import { Plus, DataLine, Edit, Close } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import type { AssetFormData, AssetRecord, Category } from '../types'
 import TagInput from './TagInput.vue'
 
@@ -138,6 +139,17 @@ watch(
   { immediate: true }
 )
 
+let previousMode = props.mode
+watch(
+  () => props.mode,
+  (newMode) => {
+    if (previousMode === 'edit' && newMode === 'create') {
+      resetForm()
+    }
+    previousMode = newMode
+  }
+)
+
 watch(
   () => props.activeCategories,
   () => {
@@ -164,6 +176,7 @@ const resetForm = () => {
 const handleSubmit = () => {
   const hasPositive = formData.categoryAmounts.some(ca => (ca.amount || 0) > 0)
   if (!hasPositive) {
+    ElMessage.error('至少输入一项资产金额（金额不能全部为 0）')
     return
   }
   

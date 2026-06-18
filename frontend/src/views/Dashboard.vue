@@ -460,7 +460,10 @@ const handleStartEdit = (record: AssetRecord) => {
   showTagStats.value = false
   showGoalManager.value = false
   showLiabilityManager.value = false
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  const el = document.getElementById('asset-form-container')
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 }
 
 const handleCancelEdit = () => {
