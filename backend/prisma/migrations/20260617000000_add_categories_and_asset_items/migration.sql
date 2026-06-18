@@ -1,7 +1,7 @@
 -- CreateTable
 CREATE TABLE "categories" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "user_id" UUID NOT NULL,
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
     "name" VARCHAR(50) NOT NULL,
     "color" VARCHAR(7) NOT NULL,
     "sort_order" INTEGER NOT NULL DEFAULT 0,
@@ -16,9 +16,9 @@ CREATE TABLE "categories" (
 
 -- CreateTable
 CREATE TABLE "asset_items" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "asset_record_id" UUID NOT NULL,
-    "category_id" UUID NOT NULL,
+    "id" TEXT NOT NULL,
+    "asset_record_id" TEXT NOT NULL,
+    "category_id" TEXT NOT NULL,
     "amount" DECIMAL(15,2) NOT NULL,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -55,46 +55,46 @@ ALTER TABLE "asset_items" ADD CONSTRAINT "asset_items_category_id_fkey" FOREIGN 
 DO $$
 DECLARE
     user_record RECORD;
-    cash_category_id UUID;
-    invest_category_id UUID;
-    bond_category_id UUID;
-    record RECORD;
+    cash_category_id TEXT;
+    invest_category_id TEXT;
+    bond_category_id TEXT;
+    asset_record RECORD;
 BEGIN
     -- For each existing user, create the three default categories
     FOR user_record IN SELECT id FROM users LOOP
         -- 活钱 (Cash) - green
         INSERT INTO categories (id, user_id, name, color, sort_order, is_active, is_default, created_at, updated_at)
-        VALUES (gen_random_uuid(), user_record.id, '活钱', '#67c23a', 0, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (gen_random_uuid()::TEXT, user_record.id, '活钱', '#67c23a', 0, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id INTO cash_category_id;
 
         -- 长期投资 (Long Term Investment) - orange
         INSERT INTO categories (id, user_id, name, color, sort_order, is_active, is_default, created_at, updated_at)
-        VALUES (gen_random_uuid(), user_record.id, '长期投资', '#e6a23c', 1, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (gen_random_uuid()::TEXT, user_record.id, '长期投资', '#e6a23c', 1, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id INTO invest_category_id;
 
         -- 稳定债券 (Stable Bond) - blue
         INSERT INTO categories (id, user_id, name, color, sort_order, is_active, is_default, created_at, updated_at)
-        VALUES (gen_random_uuid(), user_record.id, '稳定债券', '#409eff', 2, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (gen_random_uuid()::TEXT, user_record.id, '稳定债券', '#409eff', 2, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING id INTO bond_category_id;
 
         -- Migrate existing asset records to asset_items for this user
-        FOR record IN SELECT id, user_id, cash, long_term_invest, stable_bond FROM asset_records WHERE user_id = user_record.id LOOP
+        FOR asset_record IN SELECT id, user_id, cash, long_term_invest, stable_bond FROM asset_records WHERE user_id = user_record.id LOOP
             -- Insert cash item if > 0
-            IF record.cash > 0 THEN
-                INSERT INTO asset_items (asset_record_id, category_id, amount, created_at)
-                VALUES (record.id, cash_category_id, record.cash, CURRENT_TIMESTAMP);
+            IF asset_record.cash > 0 THEN
+                INSERT INTO asset_items (id, asset_record_id, category_id, amount, created_at)
+                VALUES (gen_random_uuid()::TEXT, asset_record.id, cash_category_id, asset_record.cash, CURRENT_TIMESTAMP);
             END IF;
 
             -- Insert long term investment item if > 0
-            IF record.long_term_invest > 0 THEN
-                INSERT INTO asset_items (asset_record_id, category_id, amount, created_at)
-                VALUES (record.id, invest_category_id, record.long_term_invest, CURRENT_TIMESTAMP);
+            IF asset_record.long_term_invest > 0 THEN
+                INSERT INTO asset_items (id, asset_record_id, category_id, amount, created_at)
+                VALUES (gen_random_uuid()::TEXT, asset_record.id, invest_category_id, asset_record.long_term_invest, CURRENT_TIMESTAMP);
             END IF;
 
             -- Insert stable bond item if > 0
-            IF record.stable_bond > 0 THEN
-                INSERT INTO asset_items (asset_record_id, category_id, amount, created_at)
-                VALUES (record.id, bond_category_id, record.stable_bond, CURRENT_TIMESTAMP);
+            IF asset_record.stable_bond > 0 THEN
+                INSERT INTO asset_items (id, asset_record_id, category_id, amount, created_at)
+                VALUES (gen_random_uuid()::TEXT, asset_record.id, bond_category_id, asset_record.stable_bond, CURRENT_TIMESTAMP);
             END IF;
         END LOOP;
     END LOOP;

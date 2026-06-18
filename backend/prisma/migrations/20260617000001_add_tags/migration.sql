@@ -1,7 +1,7 @@
 -- CreateTable
 CREATE TABLE "tags" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "user_id" UUID NOT NULL,
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
     "name" VARCHAR(30) NOT NULL,
     "color" VARCHAR(7) NOT NULL,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -12,9 +12,9 @@ CREATE TABLE "tags" (
 
 -- CreateTable
 CREATE TABLE "asset_record_tags" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "asset_record_id" UUID NOT NULL,
-    "tag_id" UUID NOT NULL,
+    "id" TEXT NOT NULL,
+    "asset_record_id" TEXT NOT NULL,
+    "tag_id" TEXT NOT NULL,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "asset_record_tags_pkey" PRIMARY KEY ("id")
