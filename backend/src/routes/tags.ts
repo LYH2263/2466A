@@ -43,7 +43,12 @@ const updateTagSchema = z.object({
 });
 
 const deleteTagSchema = z.object({
-  cascadeRecords: z.boolean().optional().default(false)
+  cascadeRecords: z.union([z.boolean(), z.string()]).optional().default(false).transform((val) => {
+    if (typeof val === 'string') {
+      return val.toLowerCase() === 'true';
+    }
+    return val;
+  })
 });
 
 function generateColor(existingColors: string[]): string {

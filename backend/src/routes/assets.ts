@@ -94,6 +94,25 @@ async function getDisplayCategories(userId: string, records: any[] = []) {
   });
 }
 
+async function getTagsWithUsage(userId: string) {
+  const tags = await prisma.tag.findMany({
+    where: { userId },
+    orderBy: [{ createdAt: 'asc' }]
+  });
+
+  return Promise.all(
+    tags.map(async (tag) => {
+      const recordCount = await prisma.assetRecordTag.count({
+        where: { tagId: tag.id }
+      });
+      return {
+        ...tag,
+        recordCount
+      };
+    })
+  );
+}
+
 function buildLegacyFields(categoryAmounts: any[], categories: any[]) {
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
   let cash = 0, longTermInvest = 0, stableBond = 0;
@@ -147,10 +166,7 @@ router.get('/', authMiddleware, async (req: any, res) => {
 
     const [allCategories, allTags] = await Promise.all([
       getDisplayCategories(req.userId, records),
-      prisma.tag.findMany({
-        where: { userId: req.userId },
-        orderBy: [{ createdAt: 'asc' }]
-      })
+      getTagsWithUsage(req.userId)
     ]);
 
     const recordsWithCategoryAmounts = records.map(record => {
