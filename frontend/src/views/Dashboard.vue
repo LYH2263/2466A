@@ -183,6 +183,7 @@
         <transition name="slide">
           <ReturnsAnalysis
             v-if="showReturnsAnalysis"
+            ref="returnsAnalysisRef"
             :fetch-returns-analysis="fetchReturnsAnalysis"
           />
         </transition>
@@ -349,6 +350,7 @@ const showReturnsAnalysis = ref(false)
 const showCashFlowManager = ref(false)
 const showBackupRestore = ref(false)
 const cashFlowManagerRef = ref<InstanceType<typeof CashFlowManager> | null>(null)
+const returnsAnalysisRef = ref<InstanceType<typeof ReturnsAnalysis> | null>(null)
 const trendData = ref<AssetTrend | null>(null)
 const netWorthSeries = ref<NetWorthTimePoint[]>([])
 const tagStatsRef = ref<InstanceType<typeof TagStats> | null>(null)
@@ -390,6 +392,9 @@ const handleAllocationUpdated = async () => {
 
 const handleCashFlowsUpdated = async () => {
   trendData.value = await fetchTrendAnalysis()
+  if (showReturnsAnalysis.value && returnsAnalysisRef.value) {
+    returnsAnalysisRef.value.refresh()
+  }
 }
 
 const handleDataRestored = async () => {

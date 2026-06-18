@@ -30,6 +30,27 @@
     </template>
 
     <div v-if="analysisData" class="analysis-content">
+      <div v-if="!analysisData.hasSufficientData" class="empty-state">
+        <el-empty description="所选区间暂无足够的资产记录">
+          <template #image>
+            <el-icon :size="80" color="#c0c4cc"><DataAnalysis /></el-icon>
+          </template>
+          <div v-if="analysisData.warnings.length > 0" class="empty-warnings">
+            <el-alert
+              v-for="(warning, idx) in analysisData.warnings"
+              :key="idx"
+              :title="warning"
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 8px;"
+            />
+          </div>
+          <el-button type="primary" @click="resetToDefaultRange">切换到近3个月</el-button>
+        </el-empty>
+      </div>
+
+      <template v-else>
       <div v-if="analysisData.warnings.length > 0" class="warnings-section">
         <el-alert
           v-for="(warning, idx) in analysisData.warnings"
@@ -237,6 +258,7 @@
           </el-table-column>
         </el-table>
       </div>
+      </template>
     </div>
 
     <el-empty v-else-if="!loading" description="选择日期范围后点击分析按钮开始计算收益" />
@@ -244,8 +266,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick, onBeforeUnmount } from 'vue'
-import { TrendCharts, Search, QuestionFilled, PieChart } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, watch, nextTick, onBeforeUnmount, defineExpose } from 'vue'
+import { TrendCharts, Search, QuestionFilled, PieChart, DataAnalysis } from '@element-plus/icons-vue'
 import type { ReturnsAnalysis, CategoryReturn } from '../types'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
@@ -405,7 +427,6 @@ const fetchAnalysis = async () => {
     const result = await props.fetchReturnsAnalysis(start, end)
     if (result) {
       analysisData.value = result
-      ElMessage.success('收益分析完成')
       await nextTick()
       initChart()
     } else {
@@ -415,6 +436,28 @@ const fetchAnalysis = async () => {
     loading.value = false
   }
 }
+
+const resetToDefaultRange = () => {
+  const end = new Date()
+  const start = new Date()
+  start.setMonth(start.getMonth() - 3)
+  const fmt = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  dateRange.value = [fmt(start), fmt(end)]
+  fetchAnalysis()
+}
+
+const refresh = () => {
+  if (dateRange.value && dateRange.value.length >= 2) {
+    fetchAnalysis()
+  }
+}
+
+defineExpose({ refresh, fetchAnalysis })
 
 const handleDateChange = () => {
 }
@@ -485,6 +528,16 @@ onBeforeUnmount(() => {
 
 .analysis-content {
   margin-top: 8px;
+}
+
+.empty-state {
+  padding: 40px 20px;
+}
+
+.empty-warnings {
+  max-width: 400px;
+  margin: 0 auto 20px;
+  text-align: left;
 }
 
 .warnings-section {

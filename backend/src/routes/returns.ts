@@ -125,9 +125,6 @@ function findBoundaryRecord(records: AssetRecordWithItems[], targetDate: Date, d
       if (diff < bestDiff) { bestDiff = diff; best = r; }
     }
   }
-  if (!best) {
-    best = direction === 'before' ? records[records.length - 1] : records[0];
-  }
   return best;
 }
 
@@ -368,7 +365,17 @@ router.get('/', authMiddleware, async (req: any, res: any) => {
     const endRecord = findBoundaryRecord(allRecords, end, 'after');
 
     if (!startRecord || !endRecord) {
-      emptyResponse.warnings = ['无法找到有效的边界记录'];
+      const reason: string[] = [];
+      const earliest = allRecords[0]?.date.toISOString().split('T')[0];
+      const latest = allRecords[allRecords.length - 1]?.date.toISOString().split('T')[0];
+      if (!startRecord) reason.push(`查询起始日(${startDate})早于最早记录(${earliest})，区间无数据`);
+      if (!endRecord) reason.push(`查询结束日(${endDate})晚于最晚记录(${latest})，区间无数据`);
+      emptyResponse.warnings = reason.length > 0 ? reason : ['所选区间无资产记录数据'];
+      return res.json(emptyResponse);
+    }
+
+    if (new Date(startRecord.date).getTime() > new Date(endRecord.date).getTime()) {
+      emptyResponse.warnings = ['起始记录晚于结束记录，请检查日期区间'];
       return res.json(emptyResponse);
     }
 
