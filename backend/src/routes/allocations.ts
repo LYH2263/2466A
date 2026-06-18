@@ -25,40 +25,17 @@ function authMiddleware(req: any, res: any, next: any) {
 }
 
 async function getDisplayCategories(userId: string, records: any[] = []) {
-  const activeCategories = await prisma.category.findMany({
-    where: { userId, isActive: true, deletedAt: null },
+  const allCategories = await prisma.category.findMany({
+    where: { userId, deletedAt: null },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
   });
 
   if (records.length === 0) {
-    return activeCategories;
+    return allCategories;
   }
 
-  const usedCategoryIds = new Set<string>();
-  for (const record of records) {
-    for (const item of record.assetItems || []) {
-      usedCategoryIds.add(item.categoryId);
-    }
-  }
-
-  const activeIds = new Set(activeCategories.map(c => c.id));
-  const usedInactiveIds = Array.from(usedCategoryIds).filter(id => !activeIds.has(id));
-
-  if (usedInactiveIds.length === 0) {
-    return activeCategories;
-  }
-
-  const usedInactiveCategories = await prisma.category.findMany({
-    where: {
-      userId,
-      deletedAt: null,
-      id: { in: usedInactiveIds },
-      isActive: false
-    },
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
-  });
-
-  return [...activeCategories, ...usedInactiveCategories].sort((a, b) => {
+  return allCategories.sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
@@ -92,10 +69,15 @@ function computeRebalance(
   totalAsset: number,
   warningThreshold: number
 ) {
-  const categoryIds = new Set([
-    ...Object.keys(actualAmounts),
-    ...Object.keys(targetPercentages)
-  ]);
+  const actualIds = Object.keys(actualAmounts);
+  const targetIds = Object.keys(targetPercentages);
+  const allIds = new Set([...actualIds, ...targetIds]);
+  const categoryIds = [...allIds].sort((a, b) => {
+    const aInActual = actualIds.includes(a);
+    const bInActual = actualIds.includes(b);
+    if (aInActual !== bInActual) return aInActual ? -1 : 1;
+    return 0;
+  });
 
   const items: {
     categoryId: string;
@@ -218,14 +200,14 @@ router.put('/', authMiddleware, async (req: any, res) => {
   try {
     const data = upsertAllocationSchema.parse(req.body);
 
-    const activeCategories = await prisma.category.findMany({
-      where: { userId: req.userId, isActive: true, deletedAt: null }
+    const allCategories = await prisma.category.findMany({
+      where: { userId: req.userId, deletedAt: null }
     });
-    const activeIds = new Set(activeCategories.map(c => c.id));
+    const categoryIds = new Set(allCategories.map(c => c.id));
 
     for (const a of data.allocations) {
-      if (!activeIds.has(a.categoryId)) {
-        return res.status(400).json({ error: `类别 ${a.categoryId} 不存在或已停用` });
+      if (!categoryIds.has(a.categoryId)) {
+        return res.status(400).json({ error: `类别 ${a.categoryId} 不存在` });
       }
     }
 
@@ -303,12 +285,14 @@ router.get('/rebalance', authMiddleware, async (req: any, res) => {
 
     const allCategories = await getDisplayCategories(req.userId, [latestRecord]);
 
-    const actualAmounts: Record<string, number> = {};
+    const itemAmounts: Record<string, number> = {};
     for (const item of latestRecord.assetItems) {
-      const cat = allCategories.find(c => c.id === item.categoryId);
-      if (cat) {
-        actualAmounts[item.categoryId] = Number(item.amount);
-      }
+      itemAmounts[item.categoryId] = Number(item.amount);
+    }
+
+    const actualAmounts: Record<string, number> = {};
+    for (const cat of allCategories) {
+      actualAmounts[cat.id] = itemAmounts[cat.id] ?? 0;
     }
 
     const totalAsset = Number(latestRecord.total);

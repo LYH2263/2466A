@@ -48,11 +48,14 @@
                 v-for="item in allocationItems"
                 :key="item.categoryId"
                 class="legend-item"
-                :class="{ 'legend-warning': item.isWarning }"
+                :class="{ 'legend-warning': item.isWarning, 'legend-inactive': item.isInactive }"
               >
                 <div class="legend-left">
                   <span class="color-dot" :style="{ backgroundColor: item.color }" />
-                  <span class="legend-name">{{ item.name }}</span>
+                  <span class="legend-name">
+                    {{ item.name }}
+                    <el-tag v-if="item.isInactive" size="small" type="info" effect="plain" class="inactive-tag">已停用</el-tag>
+                  </span>
                 </div>
                 <div class="legend-right">
                   <span class="legend-amount">¥{{ formatNumber(item.amount) }}</span>
@@ -285,8 +288,37 @@ const getAuthHeaders = () => {
   return { Authorization: `Bearer ${token}` }
 }
 
-const activeCategories = computed(() =>
-  props.categories.filter(c => c.isActive).sort((a, b) => a.sortOrder - b.sortOrder)
+const sortedCategories = computed(() =>
+  [...props.categories].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+    return a.sortOrder - b.sortOrder
+  })
+)
+
+const allDisplayCategories = computed(() => {
+  if (!props.latestRecord) return sortedCategories.value
+
+  const recordCategoryIds = Object.keys(props.latestRecord.categoryAmounts || {})
+  const usedInactiveIds = recordCategoryIds.filter(id => {
+    const cat = props.categories.find(c => c.id === id)
+    return cat && !cat.isActive
+  })
+
+  if (usedInactiveIds.length === 0) return sortedCategories.value
+
+  const usedInactive = usedInactiveIds
+    .map(id => props.categories.find(c => c.id === id))
+    .filter((c): c is Category => c !== undefined)
+
+  const activeList = sortedCategories.value.filter(c => c.isActive)
+  return [...activeList, ...usedInactive]
+})
+
+const targetFormCategories = computed(() =>
+  [...props.categories].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+    return a.sortOrder - b.sortOrder
+  })
 )
 
 const hasTarget = computed(() => !!targetAllocation.value)
@@ -296,17 +328,18 @@ const allocationItems = computed(() => {
 
   const total = props.latestRecord.total
   if (total === 0) {
-    return activeCategories.value.map(cat => ({
+    return allDisplayCategories.value.map(cat => ({
       categoryId: cat.id,
       name: cat.name,
       color: cat.color,
       amount: 0,
       percent: 0,
-      isWarning: false
+      isWarning: false,
+      isInactive: !cat.isActive
     }))
   }
 
-  return activeCategories.value.map(cat => {
+  return allDisplayCategories.value.map(cat => {
     const amount = props.latestRecord!.categoryAmounts?.[cat.id] ?? 0
     const percent = (amount / total) * 100
     const targetPct = targetAllocation.value?.allocations.find(
@@ -320,9 +353,10 @@ const allocationItems = computed(() => {
       color: cat.color,
       amount,
       percent,
-      isWarning
+      isWarning,
+      isInactive: !cat.isActive
     }
-  }).filter(item => item.amount > 0 || targetAllocation.value?.allocations.some(a => a.categoryId === item.categoryId))
+  })
 })
 
 const warningCount = computed(() => {
@@ -352,14 +386,14 @@ const donutChartOption = computed(() => {
   }
 
   const data = allocationItems.value
-    .filter(item => item.amount > 0)
     .map(item => ({
       value: item.amount,
       name: item.name,
       itemStyle: {
-        color: item.isWarning ? undefined : item.color,
-        borderColor: item.isWarning ? '#f56c6c' : 'transparent',
-        borderWidth: item.isWarning ? 2 : 0
+        color: item.isInactive ? undefined : item.color,
+        borderColor: item.isWarning ? '#f56c6c' : (item.isInactive ? '#c0c4cc' : 'transparent'),
+        borderWidth: item.isWarning ? 2 : (item.isInactive ? 1 : 0),
+        opacity: item.isInactive ? 0.5 : 1
       }
     }))
 
@@ -421,16 +455,42 @@ const toggleTargetForm = () => {
   }
 
   if (targetAllocation.value) {
+    const existingAllocIds = new Set(targetAllocation.value.allocations.map(a => a.categoryId))
+    const newCategoryIds = targetFormCategories.value
+      .map(c => c.id)
+      .filter(id => !existingAllocIds.has(id))
+
+    const baseAllocations = targetAllocation.value.allocations.map(a => ({ ...a }))
+    const totalExistingPct = baseAllocations.reduce((s, a) => s + a.percentage, 0)
+    const remainingPct = Math.max(0, 100 - totalExistingPct)
+    const newCount = newCategoryIds.length
+    const newPctEach = newCount > 0 ? remainingPct / newCount : 0
+
+    const newAllocations = newCategoryIds.map(id => ({
+      categoryId: id,
+      percentage: Math.round(newPctEach * 10) / 10
+    }))
+
     targetForm.value = {
-      allocations: targetAllocation.value.allocations.map(a => ({ ...a })),
+      allocations: [
+        ...baseAllocations,
+        ...newAllocations
+      ].sort((a, b) => {
+        const catA = targetFormCategories.value.find(c => c.id === a.categoryId)
+        const catB = targetFormCategories.value.find(c => c.id === b.categoryId)
+        if (!catA || !catB) return 0
+        if (catA.isActive !== catB.isActive) return catA.isActive ? -1 : 1
+        return catA.sortOrder - catB.sortOrder
+      }),
       warningThreshold: targetAllocation.value.warningThreshold
     }
   } else {
-    const count = activeCategories.value.length
+    const cats = targetFormCategories.value
+    const count = cats.length
     const basePct = Math.floor(100 / count)
     const remainder = 100 - basePct * count
     targetForm.value = {
-      allocations: activeCategories.value.map((cat, idx) => ({
+      allocations: cats.map((cat, idx) => ({
         categoryId: cat.id,
         percentage: basePct + (idx < remainder ? 1 : 0)
       })),
@@ -651,6 +711,16 @@ onMounted(() => {
 .legend-item.legend-warning {
   background: #fef0f0;
   border: 1px solid #fbc4c4;
+}
+
+.legend-item.legend-inactive {
+  opacity: 0.7;
+  background: #fafafa;
+}
+
+.inactive-tag {
+  font-weight: normal;
+  margin-left: 4px;
 }
 
 .legend-left {
