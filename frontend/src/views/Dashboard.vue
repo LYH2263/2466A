@@ -503,6 +503,7 @@ const handleFillDemo = async () => {
     trendData.value = await fetchTrendAnalysis()
     const netWorthData = await fetchNetWorth('month')
     netWorthSeries.value = netWorthData?.series || []
+    await fetchGoals()
     if (tagStatsRef.value) {
       await tagStatsRef.value.loadStatistics()
     }
@@ -518,6 +519,7 @@ const handleFillLiabilityDemo = async () => {
     trendData.value = await fetchTrendAnalysis()
     const netWorthData = await fetchNetWorth('month')
     netWorthSeries.value = netWorthData?.series || []
+    await fetchGoals()
     ElMessage.success('负债示例数据已填充')
   } catch (err: any) {
     ElMessage.error(err.message || '填充失败')
@@ -532,6 +534,7 @@ const handleLiabilityFormSubmit = async (formData: LiabilityFormData) => {
       trendData.value = await fetchTrendAnalysis()
       const netWorthData = await fetchNetWorth('month')
       netWorthSeries.value = netWorthData?.series || []
+      await fetchGoals()
     } else {
       ElMessage.error(result.error || '添加失败')
     }
@@ -545,6 +548,7 @@ const handleLiabilityFormSubmit = async (formData: LiabilityFormData) => {
       trendData.value = await fetchTrendAnalysis()
       const netWorthData = await fetchNetWorth('month')
       netWorthSeries.value = netWorthData?.series || []
+      await fetchGoals()
     } else {
       ElMessage.error(result.error || '编辑失败')
     }
@@ -575,6 +579,7 @@ const handleLiabilityDelete = async (id: string) => {
     trendData.value = await fetchTrendAnalysis()
     const netWorthData = await fetchNetWorth('month')
     netWorthSeries.value = netWorthData?.series || []
+    await fetchGoals()
     ElMessage.success('删除成功')
   } catch (err: any) {
     ElMessage.error(err.message || '删除失败')
@@ -606,6 +611,7 @@ const handleClearAll = async () => {
     trendData.value = await fetchTrendAnalysis()
     const netWorthData = await fetchNetWorth('month')
     netWorthSeries.value = netWorthData?.series || []
+    await fetchGoals()
     if (tagStatsRef.value) {
       await tagStatsRef.value.loadStatistics()
     }

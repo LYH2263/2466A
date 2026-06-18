@@ -146,7 +146,10 @@ async function calcGoalProgress(goal: any, userId: string) {
   const now = new Date();
   const targetDate = new Date(goal.targetDate);
   const targetAmount = Number(goal.targetAmount);
-  const isExpired = targetDate < now && !goal.isCompleted;
+
+  const todayStr = now.toISOString().split('T')[0];
+  const targetDateStr = targetDate.toISOString().split('T')[0];
+  const isExpired = targetDateStr < todayStr && !goal.isCompleted;
 
   let currentValue = 0;
   let latestDate: string | null = null;
@@ -223,13 +226,7 @@ async function calcGoalProgress(goal: any, userId: string) {
     prediction = predictAchieveDate(currentValue, targetAmount, growth.dailyRate || 0, growth.canPredict);
   }
 
-  if (isExceeded && !goal.isCompleted) {
-    await prisma.goal.update({
-      where: { id: goal.id },
-      data: { isCompleted: true }
-    });
-    goal.isCompleted = true;
-  }
+  const isCompleted = isExceeded || goal.isCompleted;
 
   return {
     id: goal.id,
@@ -244,7 +241,7 @@ async function calcGoalProgress(goal: any, userId: string) {
     diff: Math.round(diff * 100) / 100,
     remaining: Math.round(remaining * 100) / 100,
     isExceeded,
-    isCompleted: goal.isCompleted,
+    isCompleted,
     isExpired,
     growth: {
       monthlyRate: growth.monthlyRate ? Math.round(growth.monthlyRate * 100) / 100 : null,
