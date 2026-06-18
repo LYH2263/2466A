@@ -26,6 +26,46 @@ function authMiddleware(req: any, res: any, next: any) {
   }
 }
 
+async function getDisplayCategories(userId: string, records: any[] = []) {
+  const activeCategories = await prisma.category.findMany({
+    where: { userId, isActive: true, deletedAt: null },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  if (records.length === 0) {
+    return activeCategories;
+  }
+
+  const usedCategoryIds = new Set<string>();
+  for (const record of records) {
+    for (const item of record.assetItems || []) {
+      usedCategoryIds.add(item.categoryId);
+    }
+  }
+
+  const activeIds = new Set(activeCategories.map(c => c.id));
+  const usedInactiveIds = Array.from(usedCategoryIds).filter(id => !activeIds.has(id));
+
+  if (usedInactiveIds.length === 0) {
+    return activeCategories;
+  }
+
+  const usedInactiveCategories = await prisma.category.findMany({
+    where: {
+      userId,
+      deletedAt: null,
+      id: { in: usedInactiveIds },
+      isActive: false
+    },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  return [...activeCategories, ...usedInactiveCategories].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+}
+
 const returnsQuerySchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式必须为 YYYY-MM-DD'),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式必须为 YYYY-MM-DD')
@@ -280,7 +320,7 @@ router.get('/', authMiddleware, async (req: any, res: any) => {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    const [allRecords, allCashFlows, allCategories]: [AssetRecordWithItems[], CashFlow[], Category[]] = await Promise.all([
+    const [allRecords, allCashFlows]: [AssetRecordWithItems[], CashFlow[]] = await Promise.all([
       prisma.assetRecord.findMany({
         where: { userId: req.userId },
         include: { assetItems: true },
@@ -289,12 +329,10 @@ router.get('/', authMiddleware, async (req: any, res: any) => {
       prisma.cashFlow.findMany({
         where: { userId: req.userId },
         orderBy: { date: 'asc' }
-      }) as Promise<CashFlow[]>,
-      prisma.category.findMany({
-        where: { userId: req.userId, deletedAt: null, isActive: true },
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
-      }) as Promise<Category[]>
+      }) as Promise<CashFlow[]>
     ]);
+
+    const allCategories = await getDisplayCategories(req.userId, allRecords);
 
     const emptyResponse = {
       startDate,

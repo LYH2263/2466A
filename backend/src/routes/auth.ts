@@ -11,6 +11,27 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const ACCESS_TOKEN_EXPIRES = '15m';
 const REFRESH_TOKEN_EXPIRES_DAYS = 7;
 
+const DEFAULT_CATEGORIES = [
+  { name: '活钱', color: '#67c23a', sortOrder: 0 },
+  { name: '长期投资', color: '#e6a23c', sortOrder: 1 },
+  { name: '稳定债券', color: '#409eff', sortOrder: 2 }
+];
+
+async function createDefaultCategoriesForUser(userId: string) {
+  for (const cat of DEFAULT_CATEGORIES) {
+    await prisma.category.create({
+      data: {
+        userId,
+        name: cat.name,
+        color: cat.color,
+        sortOrder: cat.sortOrder,
+        isDefault: true,
+        isActive: true
+      }
+    });
+  }
+}
+
 // Validation schemas
 const loginSchema = z.object({
   email: z.string().email('请输入有效的邮箱地址'),
@@ -51,16 +72,33 @@ router.post('/register', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash
-      },
-      select: {
-        id: true,
-        email: true,
-        createdAt: true
+    const user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          email,
+          passwordHash
+        },
+        select: {
+          id: true,
+          email: true,
+          createdAt: true
+        }
+      });
+
+      for (const cat of DEFAULT_CATEGORIES) {
+        await tx.category.create({
+          data: {
+            userId: newUser.id,
+            name: cat.name,
+            color: cat.color,
+            sortOrder: cat.sortOrder,
+            isDefault: true,
+            isActive: true
+          }
+        });
       }
+
+      return newUser;
     });
 
     res.status(201).json({

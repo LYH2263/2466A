@@ -330,7 +330,7 @@ export const buildChartOption = (
       const categorySeries = activeCategories.map(category => {
         const data = aggregatedData.map(d => d.categoryAmounts[category.id] ?? 0)
         return {
-          name: category.name,
+          name: (category as any).displayName || category.name,
           type: 'line',
           stack: 'total',
           areaStyle: { opacity: 0.6 },
@@ -390,7 +390,7 @@ export const buildChartOption = (
       const categorySeries = activeCategories.map(category => {
         const data = aggregatedData.map(d => d.categoryAmounts[category.id] ?? 0)
         return {
-          name: category.name,
+          name: (category as any).displayName || category.name,
           type: 'bar',
           stack: 'total',
           emphasis: { focus: 'series' },
@@ -461,7 +461,7 @@ export const buildChartOption = (
     const categorySeries = activeCategories.map(category => {
       const data = aggregatedData.map(d => d.categoryAmounts[category.id] ?? 0)
       return {
-        name: category.name,
+        name: (category as any).displayName || category.name,
         type: 'line',
         smooth: true,
         data,
@@ -530,8 +530,8 @@ export const buildChartOption = (
 
   const getLegendData = () => {
     const base = chartType === 'stackedArea'
-      ? activeCategories.map(c => c.name)
-      : [...activeCategories.map(c => c.name), '总资产']
+      ? activeCategories.map(c => (c as any).displayName || c.name)
+      : [...activeCategories.map(c => (c as any).displayName || c.name), '总资产']
 
     if (showLiabilityAndNetWorth && hasNetWorthData) {
       return [...base, '总负债', '净资产']

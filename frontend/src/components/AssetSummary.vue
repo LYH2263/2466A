@@ -11,10 +11,10 @@
         <el-card
           class="summary-card"
           shadow="hover"
-          :class="`category-card-${category.id}`"
+          :class="[`category-card-${category.id}`, { 'inactive-card': !category.isActive }]"
         >
           <div class="card-content">
-            <div class="card-icon" :style="{ color: category.color }">
+            <div class="card-icon" :style="{ color: category.isActive ? category.color : '#909399' }">
               <Wallet v-if="category.name === '活钱'" />
               <TrendCharts v-else-if="category.name === '长期投资'" />
               <Money v-else-if="category.name === '稳定债券'" />
@@ -24,8 +24,13 @@
               <div class="label">
                 <span class="color-dot" :style="{ backgroundColor: category.color }" />
                 {{ category.name }}
+                <el-tag v-if="!category.isActive" size="small" type="info" class="inactive-tag">已停用</el-tag>
               </div>
-              <div class="value" v-if="latestRecord">
+              <div
+                class="value"
+                :class="{ 'inactive-value': !category.isActive }"
+                v-if="latestRecord"
+              >
                 {{ formatMoney(getCategoryAmount(category.id)) }}
               </div>
               <div class="value empty" v-else>--</div>
@@ -266,7 +271,10 @@ interface Props {
 const props = defineProps<Props>()
 
 const displayCategories = computed(() =>
-  props.categories.filter(c => c.isActive)
+  [...props.categories].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+    return a.sortOrder - b.sortOrder
+  })
 )
 
 const categoryTrendMap = computed(() => {
@@ -335,6 +343,22 @@ const getNetWorthColor = (): string => {
 
 .summary-card {
   margin-bottom: 20px;
+}
+
+.summary-card.inactive-card {
+  opacity: 0.75;
+  background: #fafafa;
+}
+
+.inactive-tag {
+  font-weight: normal;
+  margin-left: 4px;
+}
+
+.inactive-value {
+  color: #909399 !important;
+  text-decoration: line-through;
+  text-decoration-style: dotted;
 }
 
 .card-content {

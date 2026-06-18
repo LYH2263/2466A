@@ -24,6 +24,46 @@ function authMiddleware(req: any, res: any, next: any) {
   }
 }
 
+async function getDisplayCategories(userId: string, records: any[] = []) {
+  const activeCategories = await prisma.category.findMany({
+    where: { userId, isActive: true, deletedAt: null },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  if (records.length === 0) {
+    return activeCategories;
+  }
+
+  const usedCategoryIds = new Set<string>();
+  for (const record of records) {
+    for (const item of record.assetItems || []) {
+      usedCategoryIds.add(item.categoryId);
+    }
+  }
+
+  const activeIds = new Set(activeCategories.map(c => c.id));
+  const usedInactiveIds = Array.from(usedCategoryIds).filter(id => !activeIds.has(id));
+
+  if (usedInactiveIds.length === 0) {
+    return activeCategories;
+  }
+
+  const usedInactiveCategories = await prisma.category.findMany({
+    where: {
+      userId,
+      deletedAt: null,
+      id: { in: usedInactiveIds },
+      isActive: false
+    },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  return [...activeCategories, ...usedInactiveCategories].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+}
+
 const allocationItemSchema = z.object({
   categoryId: z.string(),
   percentage: z.number().min(0).max(100)
@@ -261,15 +301,12 @@ router.get('/rebalance', authMiddleware, async (req: any, res) => {
       });
     }
 
-    const allCategories = await prisma.category.findMany({
-      where: { userId: req.userId, deletedAt: null },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
-    });
+    const allCategories = await getDisplayCategories(req.userId, [latestRecord]);
 
     const actualAmounts: Record<string, number> = {};
     for (const item of latestRecord.assetItems) {
       const cat = allCategories.find(c => c.id === item.categoryId);
-      if (cat && cat.isActive) {
+      if (cat) {
         actualAmounts[item.categoryId] = Number(item.amount);
       }
     }

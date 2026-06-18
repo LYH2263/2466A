@@ -60,12 +60,20 @@
           v-for="category in displayCategories"
           :key="category.id"
           :label="category.name"
-          min-width="120"
+          min-width="140"
         >
+          <template #header>
+            <div class="column-header" :class="{ 'inactive-header': !category.isActive }">
+              <span class="color-dot" :style="{ backgroundColor: category.color }" />
+              <span>{{ category.name }}</span>
+              <el-tag v-if="!category.isActive" size="small" type="info" class="inactive-tag">已停用</el-tag>
+            </div>
+          </template>
           <template #default="{ row }">
             <span
               class="money"
-              :style="{ color: category.color }"
+              :class="{ 'inactive-money': !category.isActive }"
+              :style="{ color: category.isActive ? category.color : '#909399' }"
             >{{ formatMoney(getCategoryAmount(row, category.id)) }}</span>
           </template>
         </el-table-column>
@@ -153,7 +161,10 @@ const emit = defineEmits<{
 const selectedFilterTagId = ref<string | null>(props.filterTagId)
 
 const displayCategories = computed(() =>
-  props.categories.filter(c => c.isActive)
+  [...props.categories].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+    return a.sortOrder - b.sortOrder
+  })
 )
 
 const filterTagName = computed(() => {
@@ -261,6 +272,28 @@ const handleDelete = (row: AssetRecord) => {
   border-radius: 50%;
   flex-shrink: 0;
   border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.column-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.column-header.inactive-header {
+  opacity: 0.7;
+}
+
+.inactive-tag {
+  font-weight: normal;
+  margin-left: 2px;
+}
+
+.inactive-money {
+  opacity: 0.6;
+  text-decoration: line-through;
+  text-decoration-style: dotted;
 }
 
 .tag-count {

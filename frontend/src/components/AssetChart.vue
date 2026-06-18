@@ -146,12 +146,18 @@ const visibleStart = ref(0)
 const visibleEnd = ref(0)
 const chartReady = ref(false)
 
-const activeCategories = computed(() =>
-  props.categories.filter(c => c.isActive).sort((a, b) => a.sortOrder - b.sortOrder)
+const displayCategories = computed(() =>
+  [...props.categories].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+    return a.sortOrder - b.sortOrder
+  }).map(category => ({
+    ...category,
+    displayName: category.isActive ? category.name : `${category.name}（已停用）`
+  }))
 )
 
-const activeCategoryIds = computed(() =>
-  activeCategories.value.map(c => c.id)
+const displayCategoryIds = computed(() =>
+  displayCategories.value.map(c => c.id)
 )
 
 const hasData = computed(() => props.chartData && props.chartData.length > 0)
@@ -166,7 +172,7 @@ const aggregatedData = computed<AggregatedDataPoint[]>(() => {
     props.chartData,
     granularity.value,
     aggregateStrategy.value,
-    activeCategoryIds.value,
+    displayCategoryIds.value,
     props.netWorthSeries
   )
 })
@@ -174,7 +180,7 @@ const aggregatedData = computed<AggregatedDataPoint[]>(() => {
 const chartOption = computed(() => {
   return buildChartOption(
     aggregatedData.value,
-    activeCategories.value,
+    displayCategories.value,
     chartType.value,
     hasNetWorthData.value
   )

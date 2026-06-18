@@ -54,6 +54,46 @@ async function getActiveCategories(userId: string) {
   });
 }
 
+async function getDisplayCategories(userId: string, records: any[] = []) {
+  const activeCategories = await prisma.category.findMany({
+    where: { userId, isActive: true, deletedAt: null },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  if (records.length === 0) {
+    return activeCategories;
+  }
+
+  const usedCategoryIds = new Set<string>();
+  for (const record of records) {
+    for (const item of record.assetItems || []) {
+      usedCategoryIds.add(item.categoryId);
+    }
+  }
+
+  const activeIds = new Set(activeCategories.map(c => c.id));
+  const usedInactiveIds = Array.from(usedCategoryIds).filter(id => !activeIds.has(id));
+
+  if (usedInactiveIds.length === 0) {
+    return activeCategories;
+  }
+
+  const usedInactiveCategories = await prisma.category.findMany({
+    where: {
+      userId,
+      deletedAt: null,
+      id: { in: usedInactiveIds },
+      isActive: false
+    },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
+  });
+
+  return [...activeCategories, ...usedInactiveCategories].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+}
+
 function buildLegacyFields(categoryAmounts: any[], categories: any[]) {
   const categoryMap = new Map(categories.map(c => [c.id, c.name]));
   let cash = 0, longTermInvest = 0, stableBond = 0;
@@ -84,7 +124,6 @@ function buildCategoryMap(assetItems: any[], allCategories: any[]) {
 
 router.get('/', authMiddleware, async (req: any, res) => {
   try {
-    const includeInactive = req.query.includeInactive === 'true';
     const tagFilter = req.query.tagId ? String(req.query.tagId) : null;
 
     const whereCondition: any = { userId: req.userId };
@@ -95,25 +134,19 @@ router.get('/', authMiddleware, async (req: any, res) => {
       };
     }
 
-    const [records, allCategories, allTags] = await Promise.all([
-      prisma.assetRecord.findMany({
-        where: whereCondition,
-        include: {
-          assetItems: true,
-          tagLinks: {
-            include: { tag: true }
-          }
-        },
-        orderBy: { date: 'desc' }
-      }),
-      prisma.category.findMany({
-        where: {
-          userId: req.userId,
-          deletedAt: null,
-          ...(includeInactive ? {} : { isActive: true })
-        },
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
-      }),
+    const records = await prisma.assetRecord.findMany({
+      where: whereCondition,
+      include: {
+        assetItems: true,
+        tagLinks: {
+          include: { tag: true }
+        }
+      },
+      orderBy: { date: 'desc' }
+    });
+
+    const [allCategories, allTags] = await Promise.all([
+      getDisplayCategories(req.userId, records),
       prisma.tag.findMany({
         where: { userId: req.userId },
         orderBy: [{ createdAt: 'asc' }]
@@ -454,10 +487,7 @@ router.get('/trend', authMiddleware, async (req: any, res) => {
       });
     }
 
-    const allCategories = await prisma.category.findMany({
-      where: { userId: req.userId, deletedAt: null, isActive: true },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
-    });
+    const allCategories = await getDisplayCategories(req.userId, allRecords);
 
     const latest = allRecords[allRecords.length - 1];
     const latestDate = new Date(latest.date);
@@ -677,10 +707,7 @@ router.get('/range-analysis', authMiddleware, async (req: any, res) => {
       });
     }
 
-    const allCategories = await prisma.category.findMany({
-      where: { userId: req.userId, deletedAt: null, isActive: true },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
-    });
+    const allCategories = await getDisplayCategories(req.userId, allRecords);
 
     const findBoundaryRecord = (targetDate: Date, direction: 'before' | 'after') => {
       const targetTime = targetDate.getTime();
