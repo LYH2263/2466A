@@ -44,9 +44,7 @@ router.get('/', authMiddleware, async (req: any, res) => {
       date: r.date.toISOString().split('T')[0]
     }));
 
-    const totalLiability = formattedRecords.length > 0
-      ? formattedRecords.reduce((sum, r) => sum + r.amount, 0)
-      : 0;
+    const totalLiability = calculateTotalLiabilityAtDate(records, new Date());
 
     res.json({
       records: formattedRecords,
@@ -173,6 +171,43 @@ interface NetWorthTimePoint {
   hasLiability: boolean;
 }
 
+export function calculateTotalLiabilityAtDate(
+  liabilityRecords: any[],
+  targetDate: Date
+): number {
+  const targetTime = targetDate.getTime();
+  let total = 0;
+  const seenNames = new Map<string, { amount: number; date: Date }>();
+
+  for (const lr of liabilityRecords) {
+    const lrDate = new Date(lr.date);
+    if (lrDate.getTime() <= targetTime) {
+      const existing = seenNames.get(lr.name);
+      if (!existing || lrDate.getTime() > existing.date.getTime()) {
+        seenNames.set(lr.name, { amount: Number(lr.amount), date: lrDate });
+      }
+    }
+  }
+
+  for (const { amount } of seenNames.values()) {
+    total += amount;
+  }
+  return total;
+}
+
+function buildLiabilityTimeSeries(
+  liabilityRecords: any[],
+  allDates: string[]
+): Map<string, number> {
+  const series = new Map<string, number>();
+  for (const dateStr of allDates) {
+    const d = new Date(dateStr + 'T23:59:59');
+    const total = calculateTotalLiabilityAtDate(liabilityRecords, d);
+    series.set(dateStr, total);
+  }
+  return series;
+}
+
 function mergeAssetAndLiabilitySeries(
   assetRecords: any[],
   liabilityRecords: any[]
@@ -182,22 +217,9 @@ function mergeAssetAndLiabilitySeries(
   }
 
   const assetMap = new Map<string, number>();
-  const liabilityMap = new Map<string, number>();
-
   for (const r of assetRecords) {
     const key = formatDateKey(new Date(r.date));
     assetMap.set(key, Number(r.total));
-  }
-
-  const liabilityByDate = new Map<string, number>();
-  for (const r of liabilityRecords) {
-    const key = formatDateKey(new Date(r.date));
-    const current = liabilityByDate.get(key) || 0;
-    liabilityByDate.set(key, current + Number(r.amount));
-  }
-
-  for (const [date, total] of liabilityByDate) {
-    liabilityMap.set(date, total);
   }
 
   const allDates = new Set<string>();
@@ -211,31 +233,28 @@ function mergeAssetAndLiabilitySeries(
   const endDate = new Date(sortedDates[sortedDates.length - 1]);
   const fullDateRange = generateDateRange(startDate, endDate);
 
+  const liabilitySeries = buildLiabilityTimeSeries(liabilityRecords, fullDateRange);
+
   let lastAsset = 0;
-  let lastLiability = 0;
   let hasAnyAsset = false;
-  let hasAnyLiability = false;
+  let hasAnyLiability = liabilityRecords.length > 0;
 
   const result: NetWorthTimePoint[] = [];
 
   for (const date of fullDateRange) {
     const hasAssetNow = assetMap.has(date);
-    const hasLiabilityNow = liabilityMap.has(date);
+    const totalLiability = liabilitySeries.get(date) || 0;
 
     if (hasAssetNow) {
       lastAsset = assetMap.get(date)!;
       hasAnyAsset = true;
     }
-    if (hasLiabilityNow) {
-      lastLiability = liabilityMap.get(date)!;
-      hasAnyLiability = true;
-    }
 
     result.push({
       date,
       totalAsset: lastAsset,
-      totalLiability: lastLiability,
-      netWorth: lastAsset - lastLiability,
+      totalLiability,
+      netWorth: lastAsset - totalLiability,
       hasAsset: hasAnyAsset,
       hasLiability: hasAnyLiability
     });
@@ -316,27 +335,9 @@ router.get('/net-worth', authMiddleware, async (req: any, res) => {
       latest = aggregated[aggregated.length - 1];
     }
 
-    let totalAsset = 0;
-    let totalLiability = 0;
-
-    if (assetRecords.length > 0) {
-      const sortedAssets = [...assetRecords].sort((a, b) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-      totalAsset = Number(sortedAssets[0].total);
-    }
-
-    const liabByDate = new Map<string, number>();
-    for (const r of liabilityRecords) {
-      const key = formatDateKey(new Date(r.date));
-      liabByDate.set(key, (liabByDate.get(key) || 0) + Number(r.amount));
-    }
-    if (liabByDate.size > 0) {
-      const sortedLiabDates = Array.from(liabByDate.keys()).sort().reverse();
-      totalLiability = liabByDate.get(sortedLiabDates[0]) || 0;
-    }
-
-    const netWorth = totalAsset - totalLiability;
+    const totalAsset = latest?.totalAsset ?? 0;
+    const totalLiability = latest?.totalLiability ?? 0;
+    const netWorth = latest?.netWorth ?? 0;
 
     res.json({
       series: aggregated,

@@ -160,7 +160,11 @@ const displayCategoryIds = computed(() =>
   displayCategories.value.map(c => c.id)
 )
 
-const hasData = computed(() => props.chartData && props.chartData.length > 0)
+const hasData = computed(() => {
+  const hasAssetData = props.chartData && props.chartData.length > 0
+  const hasNetWorthData = props.netWorthSeries && props.netWorthSeries.length > 0
+  return hasAssetData || hasNetWorthData
+})
 
 const hasNetWorthData = computed(() =>
   props.netWorthSeries && props.netWorthSeries.length > 0 &&

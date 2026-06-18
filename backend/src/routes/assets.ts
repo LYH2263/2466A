@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../index.js';
 import jwt from 'jsonwebtoken';
 import { MAX_TAGS_PER_RECORD } from './tags.js';
+import { calculateTotalLiabilityAtDate } from './liabilities.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -492,7 +493,7 @@ router.get('/trend', authMiddleware, async (req: any, res) => {
       })
     ]);
 
-    if (allRecords.length === 0) {
+    if (allRecords.length === 0 && liabilityRecords.length === 0) {
       return res.json({
         latestDate: null,
         categories: [],
@@ -505,88 +506,118 @@ router.get('/trend', authMiddleware, async (req: any, res) => {
 
     const allCategories = await getDisplayCategories(req.userId, allRecords);
 
-    const latest = allRecords[allRecords.length - 1];
-    const latestDate = new Date(latest.date);
-    const yoyTargetDate = new Date(latestDate.getFullYear() - 1, latestDate.getMonth(), latestDate.getDate());
+    let latestDate: Date;
+    let latestTotal = 0;
+    let prevTotal = 0;
+    let yoyTotal = 0;
+    let previous: any = null;
+    let yoyRecord: any = null;
+    let latestCatMap: Record<string, number> = {};
+    let prevCatMap: Record<string, number> = {};
+    let yoyCatMap: Record<string, number> = {};
+    let categories: any[] = [];
 
-    const previous = allRecords.length >= 2 ? allRecords[allRecords.length - 2] : null;
-    const yoyRecord = findClosestYoyRecord(allRecords.slice(0, -1), yoyTargetDate);
+    if (allRecords.length > 0) {
+      const latest = allRecords[allRecords.length - 1];
+      latestDate = new Date(latest.date);
+      const yoyTargetDate = new Date(latestDate.getFullYear() - 1, latestDate.getMonth(), latestDate.getDate());
 
-    const latestCatMap = buildCategoryMap(latest.assetItems, allCategories);
-    const prevCatMap = previous ? buildCategoryMap(previous.assetItems, allCategories) : {};
-    const yoyCatMap = yoyRecord ? buildCategoryMap(yoyRecord.assetItems, allCategories) : {};
+      previous = allRecords.length >= 2 ? allRecords[allRecords.length - 2] : null;
+      yoyRecord = findClosestYoyRecord(allRecords.slice(0, -1), yoyTargetDate);
 
-    const latestTotal = Number(latest.total);
-    const prevTotal = previous ? Number(previous.total) : 0;
-    const yoyTotal = yoyRecord ? Number(yoyRecord.total) : 0;
+      latestCatMap = buildCategoryMap(latest.assetItems, allCategories);
+      prevCatMap = previous ? buildCategoryMap(previous.assetItems, allCategories) : {};
+      yoyCatMap = yoyRecord ? buildCategoryMap(yoyRecord.assetItems, allCategories) : {};
+
+      latestTotal = Number(latest.total);
+      prevTotal = previous ? Number(previous.total) : 0;
+      yoyTotal = yoyRecord ? Number(yoyRecord.total) : 0;
+
+      categories = allCategories.map(cat => {
+        const amount = latestCatMap[cat.id] ?? 0;
+        const prevAmount = prevCatMap[cat.id] ?? 0;
+        const yoyAmount = yoyCatMap[cat.id] ?? 0;
+
+        const momCat = previous ? calcDiff(amount, prevAmount) : { diff: 0, percent: null };
+        const yoyCat = yoyRecord ? calcDiff(amount, yoyAmount) : { diff: 0, percent: null };
+
+        return {
+          categoryId: cat.id,
+          amount,
+          percentageInTotal: latestTotal === 0 ? 0 : (amount / latestTotal) * 100,
+          mom: {
+            diff: momCat.diff,
+            percent: momCat.percent,
+            hasBase: !!previous,
+            compareDate: previous ? previous.date.toISOString().split('T')[0] : undefined
+          },
+          yoy: {
+            diff: yoyCat.diff,
+            percent: yoyCat.percent,
+            hasBase: !!yoyRecord,
+            compareDate: yoyRecord ? yoyRecord.date.toISOString().split('T')[0] : undefined
+          }
+        };
+      });
+    } else if (liabilityRecords.length > 0) {
+      const sortedLiabilities = [...liabilityRecords].sort((a, b) =>
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
+      latestDate = new Date(sortedLiabilities[sortedLiabilities.length - 1].date);
+    } else {
+      latestDate = new Date();
+    }
+
+    const latestLiability = calculateTotalLiabilityAtDate(liabilityRecords, latestDate);
+
+    let prevDate: Date | null = null;
+    let yoyDate: Date | null = null;
+    let prevLiability = 0;
+    let yoyLiability = 0;
+
+    if (previous) {
+      prevDate = new Date(previous.date);
+      prevLiability = calculateTotalLiabilityAtDate(liabilityRecords, prevDate);
+    } else if (liabilityRecords.length >= 2) {
+      const sortedLiabilities = [...liabilityRecords].sort((a, b) =>
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
+      prevDate = new Date(sortedLiabilities[sortedLiabilities.length - 2].date);
+      prevLiability = calculateTotalLiabilityAtDate(liabilityRecords, prevDate);
+      previous = { date: prevDate };
+    }
+
+    if (yoyRecord) {
+      yoyDate = new Date(yoyRecord.date);
+      yoyLiability = calculateTotalLiabilityAtDate(liabilityRecords, yoyDate);
+    } else if (liabilityRecords.length > 0) {
+      const yoyTargetDate = new Date(latestDate.getFullYear() - 1, latestDate.getMonth(), latestDate.getDate());
+      yoyRecord = findClosestYoyRecord(
+        liabilityRecords.map(r => ({ date: r.date })),
+        yoyTargetDate
+      );
+      if (yoyRecord) {
+        yoyDate = new Date(yoyRecord.date);
+        yoyLiability = calculateTotalLiabilityAtDate(liabilityRecords, yoyDate);
+      }
+    }
 
     const momCalc = previous ? calcDiff(latestTotal, prevTotal) : { diff: 0, percent: null };
     const yoyCalc = yoyRecord ? calcDiff(latestTotal, yoyTotal) : { diff: 0, percent: null };
-
-    const categories = allCategories.map(cat => {
-      const amount = latestCatMap[cat.id] ?? 0;
-      const prevAmount = prevCatMap[cat.id] ?? 0;
-      const yoyAmount = yoyCatMap[cat.id] ?? 0;
-
-      const momCat = previous ? calcDiff(amount, prevAmount) : { diff: 0, percent: null };
-      const yoyCat = yoyRecord ? calcDiff(amount, yoyAmount) : { diff: 0, percent: null };
-
-      return {
-        categoryId: cat.id,
-        amount,
-        percentageInTotal: latestTotal === 0 ? 0 : (amount / latestTotal) * 100,
-        mom: {
-          diff: momCat.diff,
-          percent: momCat.percent,
-          hasBase: !!previous,
-          compareDate: previous ? previous.date.toISOString().split('T')[0] : undefined
-        },
-        yoy: {
-          diff: yoyCat.diff,
-          percent: yoyCat.percent,
-          hasBase: !!yoyRecord,
-          compareDate: yoyRecord ? yoyRecord.date.toISOString().split('T')[0] : undefined
-        }
-      };
-    });
-
-    const getLiabilityAtDate = (targetDate: Date): number => {
-      const targetTime = targetDate.getTime();
-      let total = 0;
-      const seenNames = new Map<string, { amount: number; date: Date }>();
-      
-      for (const lr of liabilityRecords) {
-        const lrDate = new Date(lr.date);
-        if (lrDate.getTime() <= targetTime) {
-          const existing = seenNames.get(lr.name);
-          if (!existing || lrDate.getTime() > existing.date.getTime()) {
-            seenNames.set(lr.name, { amount: Number(lr.amount), date: lrDate });
-          }
-        }
-      }
-      
-      for (const { amount } of seenNames.values()) {
-        total += amount;
-      }
-      return total;
-    };
-
-    const latestLiability = getLiabilityAtDate(latestDate);
-    const prevLiability = previous ? getLiabilityAtDate(new Date(previous.date)) : 0;
-    const yoyLiability = yoyRecord ? getLiabilityAtDate(new Date(yoyRecord.date)) : 0;
-
     const momLiabilityCalc = previous ? calcDiff(latestLiability, prevLiability) : { diff: 0, percent: null };
     const yoyLiabilityCalc = yoyRecord ? calcDiff(latestLiability, yoyLiability) : { diff: 0, percent: null };
 
     const latestNetWorth = latestTotal - latestLiability;
-    const prevNetWorth = previous ? prevTotal - prevLiability : 0;
-    const yoyNetWorth = yoyRecord ? yoyTotal - yoyLiability : 0;
+    const prevNetWorth = prevTotal - prevLiability;
+    const yoyNetWorth = yoyTotal - yoyLiability;
 
     const momNetWorthCalc = previous ? calcDiff(latestNetWorth, prevNetWorth) : { diff: 0, percent: null };
     const yoyNetWorthCalc = yoyRecord ? calcDiff(latestNetWorth, yoyNetWorth) : { diff: 0, percent: null };
 
+    const formattedLatestDate = latestDate.toISOString().split('T')[0];
+
     res.json({
-      latestDate: latest.date.toISOString().split('T')[0],
+      latestDate: formattedLatestDate,
       categories,
       total: {
         amount: latestTotal,

@@ -142,16 +142,31 @@ export const aggregateRecords = (
   activeCategoryIds: string[],
   netWorthSeries: NetWorthTimePoint[] = []
 ): AggregatedDataPoint[] => {
-  if (!records || records.length === 0) {
+  const hasAssetRecords = records && records.length > 0
+  const hasNetWorthRecords = netWorthSeries && netWorthSeries.length > 0
+
+  if (!hasAssetRecords && !hasNetWorthRecords) {
     return []
   }
 
-  const sorted = [...records].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  )
+  let minDate: string
+  let maxDate: string
 
-  const minDate = sorted[0].date
-  const maxDate = sorted[sorted.length - 1].date
+  let sorted: AssetRecord[] = []
+
+  if (hasAssetRecords) {
+    sorted = [...records].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    )
+    minDate = sorted[0].date
+    maxDate = sorted[sorted.length - 1].date
+  } else {
+    const sortedNW = [...netWorthSeries].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    )
+    minDate = sortedNW[0].date
+    maxDate = sortedNW[sortedNW.length - 1].date
+  }
 
   const periodMap = new Map<string, AssetRecord[]>()
 
