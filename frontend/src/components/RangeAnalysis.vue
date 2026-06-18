@@ -29,7 +29,7 @@
       </div>
     </template>
 
-    <div v-if="analysisData" class="analysis-content">
+    <div v-if="analysisData && analysisData.hasDataInRange" class="analysis-content">
       <el-row :gutter="20">
         <el-col :xs="24" :sm="12" :md="6">
           <div class="metric-card">
@@ -76,7 +76,7 @@
             </template>
             <template v-else>
               <div class="metric-value na">--</div>
-              <div class="metric-sub na">数据不足</div>
+              <div class="metric-sub na">区间内记录不足2条</div>
             </template>
           </div>
         </el-col>
@@ -172,6 +172,15 @@
         </el-table>
       </div>
     </div>
+
+    <el-empty
+      v-else-if="analysisData && !analysisData.hasDataInRange && !loading"
+      description="所选日期范围内没有资产记录，请调整日期范围"
+    >
+      <template #image>
+        <el-icon :size="80" color="#dcdfe6"><DataLine /></el-icon>
+      </template>
+    </el-empty>
 
     <el-empty v-else-if="!loading" description="选择日期范围后点击分析按钮" />
   </el-card>

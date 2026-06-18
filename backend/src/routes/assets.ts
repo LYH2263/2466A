@@ -688,8 +688,8 @@ function calcAvgMonthlyGrowth(records: any[]) {
 router.get('/range-analysis', authMiddleware, async (req: any, res) => {
   try {
     const { startDate, endDate } = rangeSchema.parse(req.query);
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T23:59:59');
 
     const allRecords = await prisma.assetRecord.findMany({
       where: { userId: req.userId },
@@ -703,49 +703,34 @@ router.get('/range-analysis', authMiddleware, async (req: any, res) => {
         startTotal: 0, endTotal: 0, netGrowth: 0, netGrowthPercent: null,
         categoryContributions: [],
         maxDrawdown: { value: 0, percent: null, peakDate: '', troughDate: '', hasData: false },
-        avgMonthlyGrowthRate: null, monthlyCount: 0, hasSufficientData: false
+        avgMonthlyGrowthRate: null, monthlyCount: 0,
+        hasSufficientData: false, hasDataInRange: false
       });
     }
 
-    const allCategories = await getDisplayCategories(req.userId, allRecords);
+    const startTime = start.getTime();
+    const endTime = end.getTime();
 
-    const findBoundaryRecord = (targetDate: Date, direction: 'before' | 'after') => {
-      const targetTime = targetDate.getTime();
-      let best: any = null;
-      let bestDiff = Infinity;
-      for (const r of allRecords) {
-        const rTime = new Date(r.date).getTime();
-        if (direction === 'before' && rTime <= targetTime) {
-          const diff = targetTime - rTime;
-          if (diff < bestDiff) { bestDiff = diff; best = r; }
-        } else if (direction === 'after' && rTime >= targetTime) {
-          const diff = rTime - targetTime;
-          if (diff < bestDiff) { bestDiff = diff; best = r; }
-        }
-      }
-      if (!best) {
-        best = direction === 'before' ? allRecords[allRecords.length - 1] : allRecords[0];
-      }
-      return best;
-    };
+    const rangeRecords = allRecords.filter(r => {
+      const t = new Date(r.date).getTime();
+      return t >= startTime && t <= endTime;
+    });
 
-    const startRecord = findBoundaryRecord(start, 'before');
-    const endRecord = findBoundaryRecord(end, 'after');
-
-    if (!startRecord || !endRecord) {
+    if (rangeRecords.length === 0) {
       return res.json({
         startDate, endDate,
         startTotal: 0, endTotal: 0, netGrowth: 0, netGrowthPercent: null,
         categoryContributions: [],
         maxDrawdown: { value: 0, percent: null, peakDate: '', troughDate: '', hasData: false },
-        avgMonthlyGrowthRate: null, monthlyCount: 0, hasSufficientData: false
+        avgMonthlyGrowthRate: null, monthlyCount: 0,
+        hasSufficientData: false, hasDataInRange: false
       });
     }
 
-    const rangeRecords = allRecords.filter(r => {
-      const t = new Date(r.date).getTime();
-      return t >= new Date(startRecord.date).getTime() && t <= new Date(endRecord.date).getTime();
-    });
+    const allCategories = await getDisplayCategories(req.userId, allRecords);
+
+    const startRecord = rangeRecords[0];
+    const endRecord = rangeRecords[rangeRecords.length - 1];
 
     const startCatMap = buildCategoryMap(startRecord.assetItems, allCategories);
     const endCatMap = buildCategoryMap(endRecord.assetItems, allCategories);
@@ -783,7 +768,8 @@ router.get('/range-analysis', authMiddleware, async (req: any, res) => {
       maxDrawdown: maxDD,
       avgMonthlyGrowthRate: monthlyResult.rate,
       monthlyCount: monthlyResult.monthlyCount,
-      hasSufficientData: rangeRecords.length >= 2
+      hasSufficientData: rangeRecords.length >= 2,
+      hasDataInRange: true
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

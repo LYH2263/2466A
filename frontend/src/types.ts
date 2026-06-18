@@ -185,6 +185,7 @@ export interface RangeAnalysis {
   avgMonthlyGrowthRate: number | null
   monthlyCount: number
   hasSufficientData: boolean
+  hasDataInRange: boolean
 }
 
 export interface GoalGrowth {
